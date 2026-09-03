@@ -7,7 +7,10 @@ import com.intellij.execution.process.ProcessListener
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.util.Key
 import com.intellij.openapi.util.Disposer
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.nio.file.Path
@@ -17,6 +20,12 @@ import kotlin.coroutines.resumeWithException
 data class ProcessResult(
     val exitCode: Int,
     val output: String,
+)
+
+data class BinaryProcessResult(
+    val exitCode: Int,
+    val output: ByteArray,
+    val errorOutput: String,
 )
 
 class ManagedProcess internal constructor(
@@ -129,6 +138,45 @@ class ProcessRunner(
                 if (continuation.isActive) {
                     continuation.resumeWithException(error)
                 }
+            }
+        }
+    }
+
+    suspend fun executeBinary(
+        command: List<String>,
+        environment: Map<String, String> = emptyMap(),
+        workingDirectory: Path? = null,
+    ): BinaryProcessResult = withContext(Dispatchers.IO) {
+        require(command.isNotEmpty()) { "A process command cannot be empty." }
+
+        val process = ProcessBuilder(command)
+            .apply {
+                directory(workingDirectory?.toFile())
+                environment().putAll(environment)
+            }
+            .start()
+
+        try {
+            coroutineScope {
+                val output = async(Dispatchers.IO) {
+                    process.inputStream.use { it.readBytes() }
+                }
+                val errorOutput = async(Dispatchers.IO) {
+                    process.errorStream.use { it.readBytes().toString(Charsets.UTF_8) }
+                }
+                val exitCode = process.waitFor()
+                BinaryProcessResult(
+                    exitCode = exitCode,
+                    output = output.await(),
+                    errorOutput = errorOutput.await(),
+                )
+            }
+        } catch (error: CancellationException) {
+            process.destroyForcibly()
+            throw error
+        } finally {
+            if (process.isAlive) {
+                process.destroyForcibly()
             }
         }
     }

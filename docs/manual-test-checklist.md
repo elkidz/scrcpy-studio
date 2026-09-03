@@ -13,11 +13,18 @@ Android Studio build.
 
 ## Devices and sessions
 
-- [ ] Connect one USB-debugging device and refresh the list.
-- [ ] Connect one wireless-debugging device and refresh the list.
-- [ ] Show unauthorized, offline, and no-permissions states without enabling Start.
+- [ ] Connect one USB-debugging device and confirm the tool window opens automatically
+      when the automation setting is enabled.
+- [ ] Connect one wireless-debugging device and confirm it receives its own tab.
+- [ ] Confirm each connected device gets a tab before mirroring starts.
+- [ ] Show unauthorized, offline, and no-permissions states without enabling mirror
+      controls.
 - [ ] Start and stop one mirror session.
-- [ ] Start sessions for two different devices.
+- [ ] Start sessions for two different device tabs.
+- [ ] Disconnect a mirrored device and reconnect it; confirm bounded automatic
+      reconnect restores the mirror when enabled.
+- [ ] Disable auto-open, auto-mirror, and auto-reconnect independently and verify
+      each setting takes effect.
 - [ ] Close the tool window and confirm the child scrcpy processes are cleaned up.
 - [ ] Close an external scrcpy window and confirm the session state updates.
 
@@ -38,6 +45,16 @@ Android Studio build.
 - [ ] Start two sessions and confirm each uses an independent SCID and tunnel.
 - [ ] Close the tool window and confirm server processes, sockets, and reverse
       mappings are cleaned up.
+
+## Device controls
+
+- [ ] Use Rotate and confirm the embedded device orientation changes.
+- [ ] Use Back, Home, and Recents and confirm each Android navigation action.
+- [ ] Use Screenshot, save a PNG, and open the resulting file.
+- [ ] Toggle from embedded mode to the external scrcpy window and back.
+- [ ] Confirm navigation and screenshot actions work while external mode is active.
+- [ ] Confirm the existing Start recording button remains available without
+      changing its current behavior.
 
 ## Recording follow-up
 

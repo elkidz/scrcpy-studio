@@ -3,6 +3,7 @@ package com.danielribeiro.scrcpystudio.ui
 import com.danielribeiro.scrcpystudio.data.AndroidDevice
 import com.danielribeiro.scrcpystudio.presentation.DeviceMirrorUiState
 import com.danielribeiro.scrcpystudio.presentation.DeviceMirrorViewModel
+import com.danielribeiro.scrcpystudio.session.MirrorSessionState
 import com.danielribeiro.scrcpystudio.session.MirrorStatus
 import com.danielribeiro.scrcpystudio.session.ScrcpySessionService
 import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsConfigurable
@@ -14,31 +15,22 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
-import com.intellij.ui.components.JBList
-import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import java.awt.BorderLayout
 import java.awt.CardLayout
-import java.awt.Component
-import java.awt.Dimension
 import java.awt.FlowLayout
-import java.awt.GridLayout
-import javax.swing.DefaultListModel
 import javax.swing.JButton
-import javax.swing.JList
 import javax.swing.JPanel
-import javax.swing.JSplitPane
 import javax.swing.JTabbedPane
-import javax.swing.ListCellRenderer
 
 class ScrcpyToolWindowPanel(
-    project: Project,
+    private val project: Project,
     @Suppress("UNUSED_PARAMETER") private val toolWindow: ToolWindow,
 ) : SimpleToolWindowPanel(true, true), Disposable {
 
@@ -46,34 +38,24 @@ class ScrcpyToolWindowPanel(
     private val viewModel = DeviceMirrorViewModel(service)
     private val uiScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    private val deviceListModel = DefaultListModel<AndroidDevice>()
-    private val deviceList = JBList(deviceListModel)
     private val sessionTabs = JTabbedPane()
     private val sessionPanels = linkedMapOf<String, MirrorSessionPanel>()
-    private val emptySessionsLabel = JBLabel("Select a device and start mirroring.")
+    private val emptyDevicesLabel = JBLabel("Connect an Android device to get started.")
     private val sessionCards = JPanel(CardLayout())
     private val statusLabel = JBLabel("Looking for Android devices...")
-    private val startSelectedButton = JButton("Start mirroring")
     private val refreshButton = JButton("Refresh")
-    private var latestState = DeviceMirrorUiState()
     private var disposed = false
 
     init {
-        deviceList.selectionMode = javax.swing.ListSelectionModel.SINGLE_SELECTION
-        deviceList.cellRenderer = DeviceCellRenderer()
-        deviceList.preferredSize = Dimension(250, 100)
-        deviceList.addListSelectionListener {
-            if (!it.valueIsAdjusting) {
-                viewModel.selectDevice(deviceList.selectedValue?.serial)
-                updateStartButton()
-                selectSessionTab(deviceList.selectedValue?.serial)
+        sessionTabs.tabLayoutPolicy = JTabbedPane.SCROLL_TAB_LAYOUT
+        sessionTabs.addChangeListener {
+            if (!disposed) {
+                (sessionTabs.selectedComponent as? MirrorSessionPanel)
+                    ?.let { panel -> viewModel.selectDevice(panel.serial) }
             }
         }
 
         refreshButton.addActionListener { viewModel.refreshDevices() }
-        startSelectedButton.addActionListener {
-            deviceList.selectedValue?.let { viewModel.startMirror(it.serial) }
-        }
 
         val settingsButton = JButton("Settings").apply {
             addActionListener {
@@ -89,37 +71,15 @@ class ScrcpyToolWindowPanel(
             add(statusLabel)
         }
 
-        val devicesPanel = JPanel(BorderLayout()).apply {
-            border = JBUI.Borders.empty(4)
-            add(JBLabel("Connected devices"), BorderLayout.NORTH)
-            add(JBScrollPane(deviceList), BorderLayout.CENTER)
-            add(
-                JPanel(GridLayout(1, 1)).apply {
-                    border = JBUI.Borders.emptyTop(4)
-                    add(startSelectedButton)
-                },
-                BorderLayout.SOUTH,
-            )
-        }
-
-        emptySessionsLabel.horizontalAlignment = JBLabel.CENTER
-        emptySessionsLabel.foreground = JBColor.GRAY
-        sessionCards.add(emptySessionsLabel, EMPTY_CARD)
+        emptyDevicesLabel.horizontalAlignment = JBLabel.CENTER
+        emptyDevicesLabel.foreground = JBColor.GRAY
+        sessionCards.add(emptyDevicesLabel, EMPTY_CARD)
         sessionCards.add(sessionTabs, TABS_CARD)
-
-        val splitPane = JSplitPane(
-            JSplitPane.HORIZONTAL_SPLIT,
-            devicesPanel,
-            sessionCards,
-        ).apply {
-            resizeWeight = 0.28
-            dividerLocation = 260
-        }
 
         setContent(
             JPanel(BorderLayout()).apply {
                 add(toolbar, BorderLayout.NORTH)
-                add(splitPane, BorderLayout.CENTER)
+                add(sessionCards, BorderLayout.CENTER)
             },
         )
 
@@ -130,7 +90,6 @@ class ScrcpyToolWindowPanel(
     override fun dispose() {
         if (disposed) return
         disposed = true
-        viewModel.stopMonitoring()
         viewModel.dispose()
         uiScope.cancel()
         sessionPanels.values.forEach(MirrorSessionPanel::dispose)
@@ -150,35 +109,18 @@ class ScrcpyToolWindowPanel(
     }
 
     private fun render(state: DeviceMirrorUiState) {
-        latestState = state
-        updateDevices(state.devices)
-        updateSessions(state)
+        updateDeviceTabs(state)
         statusLabel.text = state.lastError ?: when (state.devices.size) {
             0 -> "No devices found"
             1 -> "1 device connected"
             else -> "${state.devices.size} devices connected"
         }
-        updateStartButton()
     }
 
-    private fun updateDevices(devices: List<AndroidDevice>) {
-        val selectedSerial = viewModel.selectedSerial.value
-            ?: deviceList.selectedValue?.serial
-        deviceListModel.removeAllElements()
-        devices.forEach(deviceListModel::addElement)
-
-        val selectedIndex = devices.indexOfFirst { it.serial == selectedSerial }
-        if (selectedIndex >= 0) {
-            deviceList.selectedIndex = selectedIndex
-        } else if (devices.isNotEmpty() && deviceList.selectedIndex < 0) {
-            deviceList.selectedIndex = 0
-            viewModel.selectDevice(devices.first().serial)
-        }
-    }
-
-    private fun updateSessions(state: DeviceMirrorUiState) {
-        val activeSerials = state.sessions.keys
-        val removedSerials = sessionPanels.keys.filterNot(activeSerials::contains)
+    private fun updateDeviceTabs(state: DeviceMirrorUiState) {
+        val devices = state.devices.sortedBy { it.displayName }
+        val connectedSerials = devices.mapTo(mutableSetOf(), AndroidDevice::serial)
+        val removedSerials = sessionPanels.keys.filterNot(connectedSerials::contains)
         removedSerials.forEach { serial ->
             sessionPanels.remove(serial)?.let {
                 sessionTabs.remove(it)
@@ -186,27 +128,39 @@ class ScrcpyToolWindowPanel(
             }
         }
 
-        state.sessions.values
-            .sortedBy { it.device.displayName }
-            .forEach { session ->
-                val panel = sessionPanels.getOrPut(session.device.serial) {
-                    val newPanel = MirrorSessionPanel(viewModel, session.device)
-                    sessionTabs.addTab(session.device.displayName, newPanel)
-                    newPanel
-                }
-                panel.update(session)
-                val tabIndex = sessionTabs.indexOfComponent(panel)
-                if (tabIndex >= 0) {
-                    sessionTabs.setTitleAt(tabIndex, session.device.displayName)
-                }
+        devices.forEach { device ->
+            val panel = sessionPanels.getOrPut(device.serial) {
+                val newPanel = MirrorSessionPanel(viewModel, device)
+                sessionTabs.addTab(device.displayName, newPanel)
+                newPanel
             }
+            panel.updateDevice(device)
+            panel.update(
+                state.sessions[device.serial]
+                    ?.copy(device = device)
+                    ?: MirrorSessionState(
+                        device = device,
+                        mirrorStatus = MirrorStatus.STOPPED,
+                    ),
+            )
+            val tabIndex = sessionTabs.indexOfComponent(panel)
+            if (tabIndex >= 0) {
+                sessionTabs.setTitleAt(tabIndex, device.displayName)
+                sessionTabs.setToolTipTextAt(tabIndex, device.serial)
+            }
+        }
 
         val card = sessionCards.layout as CardLayout
-        if (sessionPanels.isEmpty()) {
+        if (devices.isEmpty()) {
             card.show(sessionCards, EMPTY_CARD)
         } else {
             card.show(sessionCards, TABS_CARD)
-            selectSessionTab(viewModel.selectedSerial.value)
+            val selectedSerial = viewModel.selectedSerial.value
+                ?.takeIf(connectedSerials::contains)
+                ?: (sessionTabs.selectedComponent as? MirrorSessionPanel)?.serial
+                ?: devices.first().serial
+            viewModel.selectDevice(selectedSerial)
+            selectSessionTab(selectedSerial)
         }
     }
 
@@ -215,48 +169,6 @@ class ScrcpyToolWindowPanel(
         val index = sessionTabs.indexOfComponent(panel)
         if (index >= 0 && sessionTabs.selectedIndex != index) {
             sessionTabs.selectedIndex = index
-        }
-    }
-
-    private fun updateStartButton() {
-        val device = deviceList.selectedValue
-        val session = device?.serial?.let(latestState.sessions::get)
-        startSelectedButton.isEnabled = device?.canMirror == true &&
-            session?.mirrorStatus !in setOf(
-            MirrorStatus.STARTING,
-            MirrorStatus.RUNNING,
-            MirrorStatus.STOPPING,
-        )
-    }
-
-    private class DeviceCellRenderer : JPanel(BorderLayout()), ListCellRenderer<AndroidDevice> {
-        private val nameLabel = JBLabel()
-        private val detailsLabel = JBLabel()
-
-        init {
-            border = JBUI.Borders.empty(5, 6)
-            isOpaque = true
-            add(nameLabel, BorderLayout.NORTH)
-            add(detailsLabel, BorderLayout.SOUTH)
-        }
-
-        override fun getListCellRendererComponent(
-            list: JList<out AndroidDevice>,
-            value: AndroidDevice,
-            index: Int,
-            isSelected: Boolean,
-            cellHasFocus: Boolean,
-        ): Component {
-            nameLabel.text = value.displayName
-            detailsLabel.text = "${value.serial} · ${value.rawState}"
-            background = if (isSelected) list.selectionBackground else list.background
-            nameLabel.foreground = if (isSelected) list.selectionForeground else list.foreground
-            detailsLabel.foreground = if (isSelected) {
-                list.selectionForeground
-            } else {
-                JBColor.GRAY
-            }
-            return this
         }
     }
 

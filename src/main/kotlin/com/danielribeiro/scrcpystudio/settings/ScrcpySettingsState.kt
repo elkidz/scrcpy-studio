@@ -18,6 +18,9 @@ class ScrcpySettingsState : PersistentStateComponent<ScrcpySettingsState.State> 
         var scrcpyPath: String = "",
         var adbPath: String = "",
         var recordingDirectory: String = defaultRecordingDirectory(),
+        var autoOpenOnDeviceConnect: Boolean = true,
+        var autoMirrorOnDeviceConnect: Boolean = true,
+        var autoReconnect: Boolean = true,
     )
 
     private var currentState = State()

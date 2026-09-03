@@ -13,7 +13,12 @@ enum class MirrorStatus {
 
 enum class MirrorMode {
     EMBEDDED,
-    EXTERNAL_FALLBACK,
+    EXTERNAL;
+
+    fun toggled(): MirrorMode = when (this) {
+        EMBEDDED -> EXTERNAL
+        EXTERNAL -> EMBEDDED
+    }
 }
 
 enum class RecordingStatus {
@@ -25,8 +30,21 @@ enum class RecordingStatus {
     FAILED,
 }
 
+enum class ScreenshotStatus {
+    IDLE,
+    SAVING,
+    COMPLETED,
+    FAILED,
+}
+
 data class RecordingState(
     val status: RecordingStatus = RecordingStatus.IDLE,
+    val outputFile: Path? = null,
+    val errorMessage: String? = null,
+)
+
+data class ScreenshotState(
+    val status: ScreenshotStatus = ScreenshotStatus.IDLE,
     val outputFile: Path? = null,
     val errorMessage: String? = null,
 )
@@ -36,5 +54,7 @@ data class MirrorSessionState(
     val mirrorStatus: MirrorStatus,
     val mirrorMode: MirrorMode = MirrorMode.EMBEDDED,
     val errorMessage: String? = null,
+    val modeMessage: String? = null,
     val recording: RecordingState = RecordingState(),
+    val screenshot: ScreenshotState = ScreenshotState(),
 )

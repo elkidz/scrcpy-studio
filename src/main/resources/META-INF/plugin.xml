@@ -5,8 +5,8 @@
 
     <description><![CDATA[
         Mirror and control Android devices in Android Studio with scrcpy.
-        Includes device discovery, an embedded protocol client with an
-        external-window fallback, and MP4 recording.
+        Includes device tabs, device controls, an embedded protocol client
+        with an external-window fallback, screenshots, and MP4 recording.
     ]]></description>
 
     <depends>com.intellij.modules.platform</depends>
@@ -14,6 +14,7 @@
     <depends>org.jetbrains.android</depends>
 
     <extensions defaultExtensionNs="com.intellij">
+        <postStartupActivity implementation="com.danielribeiro.scrcpystudio.lifecycle.ScrcpyProjectActivity"/>
         <toolWindow
                 id="Scrcpy Studio"
                 anchor="right"

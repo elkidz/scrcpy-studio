@@ -32,8 +32,8 @@ intellijPlatform {
         version = providers.gradleProperty("pluginVersion")
         description = """
             Mirror and control Android devices in Android Studio with scrcpy.
-            Includes device discovery, an embedded protocol client with an
-            external-window fallback, and MP4 recording.
+            Includes device tabs, device controls, an embedded protocol client
+            with an external-window fallback, screenshots, and MP4 recording.
         """.trimIndent()
         vendor {
             name = "Daniel Ribeiro"

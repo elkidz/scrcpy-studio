@@ -101,6 +101,26 @@ class DeviceMirrorViewModel(
         service.sendBack(serial)
     }
 
+    fun sendHome(serial: String) {
+        service.sendHome(serial)
+    }
+
+    fun sendRecents(serial: String) {
+        service.sendRecents(serial)
+    }
+
+    fun rotate(serial: String) {
+        service.rotate(serial)
+    }
+
+    fun takeScreenshot(serial: String, outputFile: Path) {
+        service.takeScreenshot(serial, outputFile)
+    }
+
+    fun toggleMirrorMode(serial: String) {
+        service.toggleMirrorMode(serial)
+    }
+
     fun startRecording(serial: String, outputFile: Path) {
         service.startRecording(serial, outputFile)
     }

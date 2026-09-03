@@ -5,15 +5,18 @@ import com.danielribeiro.scrcpystudio.data.AndroidDevice
 import com.danielribeiro.scrcpystudio.data.ScrcpyRepository
 import com.danielribeiro.scrcpystudio.process.ManagedProcess
 import com.danielribeiro.scrcpystudio.process.ProcessRunner
+import com.danielribeiro.scrcpystudio.protocol.ScrcpyControlWriter
 import com.danielribeiro.scrcpystudio.protocol.ScrcpyProtocolException
 import com.danielribeiro.scrcpystudio.protocol.ScrcpyProtocolRepository
 import com.danielribeiro.scrcpystudio.protocol.ScrcpyProtocolSession
 import com.danielribeiro.scrcpystudio.protocol.ScrcpyVideoFrame
+import com.danielribeiro.scrcpystudio.screenshot.ScreenshotRepository
 import com.danielribeiro.scrcpystudio.settings.ExecutableResolver
 import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsState
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.wm.ToolWindowManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -22,6 +25,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -43,7 +47,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 @Service(Service.Level.PROJECT)
 class ScrcpySessionService(
-    @Suppress("UNUSED_PARAMETER") private val project: Project,
+    private val project: Project,
 ) : Disposable {
 
     private val settings = ScrcpySettingsState.getInstance()
@@ -52,6 +56,11 @@ class ScrcpySessionService(
     private val adbRepository = AdbRepository(settings, executableResolver, processRunner)
     private val scrcpyRepository = ScrcpyRepository(settings, executableResolver, processRunner)
     private val protocolRepository = ScrcpyProtocolRepository(
+        settings = settings,
+        executableResolver = executableResolver,
+        processRunner = processRunner,
+    )
+    private val screenshotRepository = ScreenshotRepository(
         settings = settings,
         executableResolver = executableResolver,
         processRunner = processRunner,
@@ -79,6 +88,11 @@ class ScrcpySessionService(
     private val protocolSessions = ConcurrentHashMap<String, ScrcpyProtocolSession>()
     private val recordingProcesses = ConcurrentHashMap<String, ManagedProcess>()
     private val startingMirrorJobs = ConcurrentHashMap<String, Job>()
+    private val autoStartJobs = ConcurrentHashMap<String, Job>()
+    private val preferredModes = ConcurrentHashMap<String, MirrorMode>()
+    private val reconnectIntents = ConcurrentHashMap<String, MirrorMode>()
+    private val rotations = ConcurrentHashMap<String, Int>()
+    private val deviceConnectionTracker = DeviceConnectionTracker()
     private var monitoringJob: Job? = null
 
     fun startMonitoring() {
@@ -86,7 +100,7 @@ class ScrcpySessionService(
 
         monitoringJob = scope.launch {
             while (isActive) {
-                refreshDevicesNow()
+                refreshDevicesNow(processConnectionEvents = true)
                 delay(DEVICE_REFRESH_INTERVAL_MS)
             }
         }
@@ -99,11 +113,14 @@ class ScrcpySessionService(
 
     fun refreshDevices() {
         scope.launch {
-            refreshDevicesNow()
+            refreshDevicesNow(processConnectionEvents = true)
         }
     }
 
-    fun startMirror(serial: String) {
+    fun startMirror(
+        serial: String,
+        requestedMode: MirrorMode? = null,
+    ): Job? {
         val job = scope.launch(
             context = Dispatchers.IO,
             start = CoroutineStart.LAZY,
@@ -116,7 +133,7 @@ class ScrcpySessionService(
                     return@launch
                 }
 
-                val devices = refreshDevicesNow() ?: return@launch
+                val devices = refreshDevicesNow(processConnectionEvents = false) ?: return@launch
                 val device = devices.firstOrNull { it.serial == serial }
                 if (device == null) {
                     _lastError.value = "The selected device is no longer connected."
@@ -131,11 +148,23 @@ class ScrcpySessionService(
                     return@launch
                 }
 
+                val mode = requestedMode
+                    ?: preferredModes[serial]
+                    ?: MirrorMode.EMBEDDED
+                preferredModes[serial] = mode
+                reconnectIntents.remove(serial)
                 updateSession(
                     device = device,
                     mirrorStatus = MirrorStatus.STARTING,
-                    mirrorMode = MirrorMode.EMBEDDED,
+                    mirrorMode = mode,
+                    errorMessage = null,
+                    modeMessage = null,
                 )
+                if (mode == MirrorMode.EXTERNAL) {
+                    startExternal(device)
+                    return@launch
+                }
+
                 var candidateProtocolSession: ScrcpyProtocolSession? = null
                 var protocolSessionRegistered = false
                 try {
@@ -182,7 +211,7 @@ class ScrcpySessionService(
                     } else {
                         candidateProtocolSession?.dispose()
                     }
-                    startExternalFallback(device, protocolError = error)
+                    startExternal(device, protocolError = error)
                 }
             } finally {
                 currentCoroutineContext()[Job]?.let { job ->
@@ -192,14 +221,16 @@ class ScrcpySessionService(
         }
         if (startingMirrorJobs.putIfAbsent(serial, job) == null) {
             job.start()
+            return job
         } else {
             job.cancel()
+            return null
         }
     }
 
-    private fun startExternalFallback(
+    private fun startExternal(
         device: AndroidDevice,
-        protocolError: Exception,
+        protocolError: Exception? = null,
     ) {
         if (mirrorProcesses[device.serial]?.isRunning == true) return
         try {
@@ -217,45 +248,96 @@ class ScrcpySessionService(
             updateSession(
                 device = device,
                 mirrorStatus = MirrorStatus.RUNNING,
-                mirrorMode = MirrorMode.EXTERNAL_FALLBACK,
+                mirrorMode = MirrorMode.EXTERNAL,
+                modeMessage = protocolError?.let {
+                    "Embedded mode unavailable; using the external scrcpy window."
+                },
             )
         } catch (fallbackError: Exception) {
             updateSession(
                 device = device,
                 mirrorStatus = MirrorStatus.FAILED,
                 errorMessage = buildString {
-                    append("Embedded scrcpy failed: ")
-                    append(protocolError.message ?: "unknown error")
-                    append(". External fallback failed: ")
+                    if (protocolError != null) {
+                        append("Embedded scrcpy failed: ")
+                        append(protocolError.message ?: "unknown error")
+                        append(". External fallback failed: ")
+                    } else {
+                        append("External scrcpy failed: ")
+                    }
                     append(fallbackError.message ?: "unknown error")
                 },
-                mirrorMode = MirrorMode.EMBEDDED,
+                mirrorMode = MirrorMode.EXTERNAL,
+                modeMessage = null,
             )
         }
     }
 
     fun stopMirror(serial: String) {
         scope.launch(Dispatchers.IO) {
-            val startingJob = startingMirrorJobs.remove(serial)
-            val device = _devices.value.firstOrNull { it.serial == serial }
-                ?: _sessions.value[serial]?.device
-            if (device == null) {
-                startingJob?.cancel()
-                return@launch
-            }
-            updateSession(device, MirrorStatus.STOPPING)
+            stopMirrorInternal(serial, cancelAutoStart = true)
+        }
+    }
 
-            startingJob?.cancel()
-            stopRecordingInternal(serial)
-            val process = mirrorProcesses.remove(serial)
-            val protocolSession = protocolSessions.remove(serial)
-            if (process == null && protocolSession == null) {
-                updateSession(device, MirrorStatus.STOPPED)
-            } else {
-                process?.dispose()
-                protocolSession?.dispose()
-                updateSession(device, MirrorStatus.STOPPED)
+    fun toggleMirrorMode(serial: String) {
+        val device = _devices.value.firstOrNull { it.serial == serial }
+            ?: _sessions.value[serial]?.device
+            ?: return
+        val current = _sessions.value[serial]
+            ?: MirrorSessionState(
+                device = device,
+                mirrorStatus = MirrorStatus.STOPPED,
+                mirrorMode = preferredModes[serial] ?: MirrorMode.EMBEDDED,
+            )
+        ensureSession(device)
+        val targetMode = current.mirrorMode.toggled()
+        preferredModes[serial] = targetMode
+
+        if (current.mirrorStatus == MirrorStatus.RUNNING ||
+            current.mirrorStatus == MirrorStatus.STARTING
+        ) {
+            scope.launch(Dispatchers.IO) {
+                stopMirrorInternal(serial, cancelAutoStart = true)
+                startMirror(serial, requestedMode = targetMode)
             }
+        } else {
+            updateSession(
+                device = current.device,
+                mirrorStatus = current.mirrorStatus,
+                mirrorMode = targetMode,
+                errorMessage = null,
+                modeMessage = null,
+            )
+        }
+    }
+
+    private suspend fun stopMirrorInternal(
+        serial: String,
+        cancelAutoStart: Boolean,
+    ) {
+        if (cancelAutoStart) {
+            autoStartJobs.remove(serial)?.cancel()
+            reconnectIntents.remove(serial)
+        }
+        val startingJob = startingMirrorJobs.remove(serial)
+        val device = _devices.value.firstOrNull { it.serial == serial }
+            ?: _sessions.value[serial]?.device
+        if (device == null) {
+            startingJob?.cancelAndJoin()
+            return
+        }
+        updateSession(device, MirrorStatus.STOPPING)
+
+        startingJob?.cancelAndJoin()
+        stopRecordingInternal(serial)
+        val process = mirrorProcesses.remove(serial)
+        val protocolSession = protocolSessions.remove(serial)
+        if (process == null && protocolSession == null) {
+            updateSession(device, MirrorStatus.STOPPED)
+        } else {
+            process?.dispose()
+            protocolSession?.dispose()
+            updateSession(device, MirrorStatus.STOPPED)
         }
     }
 
@@ -284,6 +366,99 @@ class ScrcpySessionService(
 
     fun sendBack(serial: String) {
         protocolSessions[serial]?.sendBack()
+            ?: sendExternalKeyevent(serial, ScrcpyControlWriter.KEYCODE_BACK)
+    }
+
+    fun sendHome(serial: String) {
+        protocolSessions[serial]?.sendHome()
+            ?: sendExternalKeyevent(serial, ScrcpyControlWriter.KEYCODE_HOME)
+    }
+
+    fun sendRecents(serial: String) {
+        protocolSessions[serial]?.sendRecents()
+            ?: sendExternalKeyevent(serial, ScrcpyControlWriter.KEYCODE_APP_SWITCH)
+    }
+
+    fun rotate(serial: String) {
+        val protocolSession = protocolSessions[serial]
+        if (protocolSession != null) {
+            protocolSession.rotateDevice()
+            return
+        }
+        if (mirrorProcesses[serial]?.isRunning != true) {
+            _lastError.value = "Start mirroring before rotating the device."
+            return
+        }
+
+        val nextRotation = rotations.compute(serial) { _, previous ->
+            ((previous ?: 0) + 1) % DISPLAY_ROTATIONS
+        } ?: 0
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                adbRepository.rotateDisplay(serial, nextRotation)
+            }.onFailure { error ->
+                rotations[serial] = (nextRotation + DISPLAY_ROTATIONS - 1) % DISPLAY_ROTATIONS
+                _lastError.value = error.message ?: "Unable to rotate the device."
+            }
+        }
+    }
+
+    fun takeScreenshot(
+        serial: String,
+        outputFile: Path,
+    ) {
+        val device = _devices.value.firstOrNull { it.serial == serial }
+            ?: _sessions.value[serial]?.device
+        if (device == null) {
+            _lastError.value = "The selected device is no longer connected."
+            return
+        }
+        ensureSession(device)
+        updateScreenshot(
+            serial = serial,
+            screenshot = ScreenshotState(
+                status = ScreenshotStatus.SAVING,
+                outputFile = outputFile.toAbsolutePath().normalize(),
+            ),
+        )
+        scope.launch(Dispatchers.IO) {
+            try {
+                val savedFile = screenshotRepository.capture(device, outputFile)
+                updateScreenshot(
+                    serial = serial,
+                    screenshot = ScreenshotState(
+                        status = ScreenshotStatus.COMPLETED,
+                        outputFile = savedFile,
+                    ),
+                )
+            } catch (error: Exception) {
+                updateScreenshot(
+                    serial = serial,
+                    screenshot = ScreenshotState(
+                        status = ScreenshotStatus.FAILED,
+                        outputFile = outputFile.toAbsolutePath().normalize(),
+                        errorMessage = error.message ?: "Unable to save the screenshot.",
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun sendExternalKeyevent(
+        serial: String,
+        keycode: Int,
+    ) {
+        if (mirrorProcesses[serial]?.isRunning != true) {
+            _lastError.value = "Start mirroring before using device navigation."
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            runCatching {
+                adbRepository.sendKeyevent(serial, keycode)
+            }.onFailure { error ->
+                _lastError.value = error.message ?: "Unable to send the device navigation command."
+            }
+        }
     }
 
     fun startRecording(serial: String, outputFile: Path) {
@@ -358,6 +533,7 @@ class ScrcpySessionService(
     override fun dispose() {
         stopMonitoring()
         startingMirrorJobs.values.forEach(Job::cancel)
+        autoStartJobs.values.forEach(Job::cancel)
         scope.cancel()
         mirrorProcesses.values.forEach(ManagedProcess::stop)
         protocolSessions.values.forEach(ScrcpyProtocolSession::dispose)
@@ -366,15 +542,24 @@ class ScrcpySessionService(
         protocolSessions.clear()
         recordingProcesses.clear()
         startingMirrorJobs.clear()
+        autoStartJobs.clear()
+        preferredModes.clear()
+        reconnectIntents.clear()
+        rotations.clear()
+        deviceConnectionTracker.reset()
     }
 
-    private suspend fun refreshDevicesNow(): List<AndroidDevice>? =
-        refreshMutex.withLock {
+    private suspend fun refreshDevicesNow(
+        processConnectionEvents: Boolean,
+    ): List<AndroidDevice>? {
+        var deviceDiff: DeviceConnectionDiff? = null
+        val devices = refreshMutex.withLock {
             try {
-                val devices = adbRepository.listDevices()
-                _devices.value = devices
+                val currentDevices = adbRepository.listDevices()
+                deviceDiff = deviceConnectionTracker.update(currentDevices)
+                _devices.value = currentDevices
                 _lastError.value = null
-                devices
+                currentDevices
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (error: Exception) {
@@ -382,6 +567,100 @@ class ScrcpySessionService(
                 null
             }
         }
+        if (processConnectionEvents && devices != null && deviceDiff != null) {
+            handleDeviceChanges(deviceDiff)
+        }
+        return devices
+    }
+
+    private fun handleDeviceChanges(
+        diff: DeviceConnectionDiff,
+    ) {
+        diff.disconnected.forEach { device ->
+            val session = _sessions.value[device.serial]
+            val isActive = session?.mirrorStatus == MirrorStatus.STARTING ||
+                session?.mirrorStatus == MirrorStatus.RUNNING
+            if (isActive && settings.getState().autoReconnect) {
+                reconnectIntents[device.serial] =
+                    preferredModes[device.serial] ?: session.mirrorMode
+            }
+            autoStartJobs.remove(device.serial)?.cancel()
+            scope.launch(Dispatchers.IO) {
+                stopMirrorInternal(device.serial, cancelAutoStart = false)
+            }
+        }
+
+        diff.connected
+            .filter(AndroidDevice::canMirror)
+            .forEach { device ->
+                showToolWindowIfConfigured()
+                val reconnectMode = reconnectIntents[device.serial]
+                if (reconnectMode != null) {
+                    if (settings.getState().autoReconnect) {
+                        scheduleAutomaticStart(
+                            serial = device.serial,
+                            mode = reconnectMode,
+                            retry = true,
+                        )
+                    } else {
+                        reconnectIntents.remove(device.serial)
+                    }
+                } else if (settings.getState().autoMirrorOnDeviceConnect) {
+                    scheduleAutomaticStart(
+                        serial = device.serial,
+                        mode = preferredModes[device.serial] ?: MirrorMode.EMBEDDED,
+                        retry = true,
+                    )
+                }
+            }
+    }
+
+    private fun showToolWindowIfConfigured() {
+        if (!settings.getState().autoOpenOnDeviceConnect) return
+        ToolWindowManager.getInstance(project).invokeLater {
+            val toolWindow = ToolWindowManager.getInstance(project)
+                .getToolWindow(TOOL_WINDOW_ID)
+            if (toolWindow?.isAvailable == true && !toolWindow.isVisible) {
+                toolWindow.show()
+            }
+        }
+    }
+
+    private fun scheduleAutomaticStart(
+        serial: String,
+        mode: MirrorMode,
+        retry: Boolean,
+    ) {
+        val job = scope.launch(
+            context = Dispatchers.IO,
+            start = CoroutineStart.LAZY,
+        ) {
+            try {
+                val attempts = if (retry) AUTO_START_ATTEMPTS else 1
+                repeat(attempts) { attempt ->
+                    if (!isActive) return@launch
+                    if (_devices.value.firstOrNull { it.serial == serial }?.canMirror != true) {
+                        return@launch
+                    }
+                    val startJob = startMirror(serial, requestedMode = mode)
+                    startJob?.join()
+                    if (_sessions.value[serial]?.mirrorStatus == MirrorStatus.RUNNING) {
+                        return@launch
+                    }
+                    if (attempt + 1 < attempts) {
+                        delay(AUTO_START_BACKOFF_MS[attempt])
+                    }
+                }
+            } finally {
+                currentCoroutineContext()[Job]?.let { autoStartJobs.remove(serial, it) }
+            }
+        }
+        if (autoStartJobs.putIfAbsent(serial, job) == null) {
+            job.start()
+        } else {
+            job.cancel()
+        }
+    }
 
     private fun handleMirrorTerminated(
         device: AndroidDevice,
@@ -401,6 +680,7 @@ class ScrcpySessionService(
             } else {
                 null
             },
+            modeMessage = null,
         )
     }
 
@@ -423,9 +703,10 @@ class ScrcpySessionService(
                 device = device,
                 mirrorStatus = MirrorStatus.STOPPED,
                 mirrorMode = MirrorMode.EMBEDDED,
+                modeMessage = null,
             )
         } else {
-            startExternalFallback(
+            startExternal(
                 device = device,
                 protocolError = error as? Exception
                     ?: ScrcpyProtocolException("The embedded scrcpy session ended."),
@@ -467,6 +748,7 @@ class ScrcpySessionService(
         mirrorStatus: MirrorStatus,
         errorMessage: String? = null,
         mirrorMode: MirrorMode? = null,
+        modeMessage: String? = null,
     ) {
         _sessions.update { current ->
             val previous = current[device.serial]
@@ -476,9 +758,27 @@ class ScrcpySessionService(
                     mirrorStatus = mirrorStatus,
                     mirrorMode = mirrorMode ?: previous?.mirrorMode ?: MirrorMode.EMBEDDED,
                     errorMessage = errorMessage,
+                    modeMessage = modeMessage,
                     recording = previous?.recording ?: RecordingState(),
+                    screenshot = previous?.screenshot ?: ScreenshotState(),
                 )
                 )
+        }
+    }
+
+    private fun ensureSession(device: AndroidDevice) {
+        _sessions.update { current ->
+            if (current.containsKey(device.serial)) {
+                current
+            } else {
+                current + (
+                    device.serial to MirrorSessionState(
+                        device = device,
+                        mirrorStatus = MirrorStatus.STOPPED,
+                        mirrorMode = preferredModes[device.serial] ?: MirrorMode.EMBEDDED,
+                    )
+                    )
+            }
         }
     }
 
@@ -486,6 +786,16 @@ class ScrcpySessionService(
         _sessions.update { current ->
             val session = current[serial] ?: return@update current
             current + (serial to session.copy(recording = recording))
+        }
+    }
+
+    private fun updateScreenshot(
+        serial: String,
+        screenshot: ScreenshotState,
+    ) {
+        _sessions.update { current ->
+            val session = current[serial] ?: return@update current
+            current + (serial to session.copy(screenshot = screenshot))
         }
     }
 
@@ -516,5 +826,9 @@ class ScrcpySessionService(
     companion object {
         private const val DEVICE_REFRESH_INTERVAL_MS = 1_500L
         private const val WINDOWS_CONTROL_C_EXIT_CODE = -1_073_741_510
+        private const val DISPLAY_ROTATIONS = 4
+        private const val AUTO_START_ATTEMPTS = 3
+        private const val TOOL_WINDOW_ID = "Scrcpy Studio"
+        private val AUTO_START_BACKOFF_MS = longArrayOf(500L, 1_000L)
     }
 }

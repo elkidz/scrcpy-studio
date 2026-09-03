@@ -11,6 +11,27 @@ class ScrcpyControlWriter(
     private val output = DataOutputStream(output)
     private val lock = Any()
 
+    fun injectKeycode(
+        action: Int,
+        keycode: Int,
+        repeat: Int = 0,
+        metastate: Int = 0,
+    ) {
+        require(action in 0..0xFF) { "Key action must fit in one byte." }
+        require(keycode >= 0) { "Keycode cannot be negative." }
+        require(repeat >= 0) { "Key repeat cannot be negative." }
+        require(metastate >= 0) { "Key metastate cannot be negative." }
+
+        synchronized(lock) {
+            output.writeByte(TYPE_INJECT_KEYCODE)
+            output.writeByte(action)
+            output.writeInt(keycode)
+            output.writeInt(repeat)
+            output.writeInt(metastate)
+            output.flush()
+        }
+    }
+
     fun injectTouch(
         action: Int,
         pointerId: Long,
@@ -51,12 +72,38 @@ class ScrcpyControlWriter(
         }
     }
 
+    fun home(action: Int = KEY_ACTION_DOWN) {
+        injectKeycode(
+            action = action,
+            keycode = KEYCODE_HOME,
+        )
+    }
+
+    fun recents(action: Int = KEY_ACTION_DOWN) {
+        injectKeycode(
+            action = action,
+            keycode = KEYCODE_APP_SWITCH,
+        )
+    }
+
+    fun rotateDevice() {
+        synchronized(lock) {
+            output.writeByte(TYPE_ROTATE_DEVICE)
+            output.flush()
+        }
+    }
+
     companion object {
+        const val TYPE_INJECT_KEYCODE = 0
         const val POINTER_ID_MOUSE = -1L
         const val TYPE_INJECT_TOUCH_EVENT = 2
         const val TYPE_BACK_OR_SCREEN_ON = 4
+        const val TYPE_ROTATE_DEVICE = 11
         const val KEY_ACTION_DOWN = 0
         const val KEY_ACTION_UP = 1
+        const val KEYCODE_HOME = 3
+        const val KEYCODE_BACK = 4
+        const val KEYCODE_APP_SWITCH = 187
 
         private const val MAX_U16 = 65_535
     }
