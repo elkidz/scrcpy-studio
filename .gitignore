@@ -1,0 +1,12 @@
+.gradle/
+.intellijPlatform/
+build/
+out/
+.idea/
+*.iml
+
+# Local tool distributions and recordings
+scrcpy-win64-*/
+recordings/
+*.mp4
+*.mkv

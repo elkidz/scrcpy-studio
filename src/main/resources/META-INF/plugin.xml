@@ -1,0 +1,37 @@
+<idea-plugin>
+    <id>com.danielribeiro.scrcpystudio</id>
+    <name>Scrcpy Studio</name>
+    <vendor>Daniel Ribeiro</vendor>
+
+    <description><![CDATA[
+        Mirror and control Android devices in Android Studio with scrcpy.
+        Includes device discovery, an embedded protocol client with an
+        external-window fallback, and MP4 recording.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.androidstudio</depends>
+    <depends>org.jetbrains.android</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow
+                id="Scrcpy Studio"
+                anchor="right"
+                factoryClass="com.danielribeiro.scrcpystudio.ui.ScrcpyToolWindowFactory"/>
+        <applicationConfigurable
+                parentId="tools"
+                id="com.danielribeiro.scrcpystudio.settings"
+                displayName="Scrcpy Studio"
+                instance="com.danielribeiro.scrcpystudio.settings.ScrcpySettingsConfigurable"/>
+    </extensions>
+
+    <actions>
+        <action
+                id="com.danielribeiro.scrcpystudio.actions.OpenToolWindow"
+                class="com.danielribeiro.scrcpystudio.actions.OpenScrcpyToolWindowAction"
+                text="Scrcpy Studio"
+                description="Open the Scrcpy Studio tool window">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
+    </actions>
+</idea-plugin>
