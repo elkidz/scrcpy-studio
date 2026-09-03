@@ -1,6 +1,7 @@
 package com.danielribeiro.scrcpystudio.protocol
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayOutputStream
@@ -8,6 +9,35 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 class ScrcpyControlWriterTest {
+
+    @Test
+    fun serializesHomeKeycodeUsingScrcpyWireLayout() {
+        val bytes = ByteArrayOutputStream()
+
+        ScrcpyControlWriter(bytes).home()
+
+        val data = bytes.toByteArray()
+        val buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN)
+        assertEquals(14, data.size)
+        assertEquals(ScrcpyControlWriter.TYPE_INJECT_KEYCODE, buffer.get().toInt())
+        assertEquals(ScrcpyControlWriter.KEY_ACTION_DOWN, buffer.get().toInt())
+        assertEquals(ScrcpyControlWriter.KEYCODE_HOME, buffer.int)
+        assertEquals(0, buffer.int)
+        assertEquals(0, buffer.int)
+        assertTrue(buffer.remaining() == 0)
+    }
+
+    @Test
+    fun serializesRotateCommandWithoutPayload() {
+        val bytes = ByteArrayOutputStream()
+
+        ScrcpyControlWriter(bytes).rotateDevice()
+
+        assertArrayEquals(
+            byteArrayOf(ScrcpyControlWriter.TYPE_ROTATE_DEVICE.toByte()),
+            bytes.toByteArray(),
+        )
+    }
 
     @Test
     fun serializesTouchEventUsingScrcpyWireLayout() {

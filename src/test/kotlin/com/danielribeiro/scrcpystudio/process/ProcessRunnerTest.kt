@@ -30,6 +30,16 @@ class ProcessRunnerTest {
         assertTrue(result.output.isNotBlank())
     }
 
+    @Test
+    fun capturesBinaryProcessOutputAndSeparateErrorStream() = runBlocking {
+        val result = ProcessRunner().executeBinary(
+            command = listOf(javaExecutablePath().toString(), "-version"),
+        )
+
+        assertEquals(0, result.exitCode)
+        assertTrue(result.errorOutput.contains("version", ignoreCase = true))
+    }
+
     private fun javaExecutablePath() =
         Files
             .isRegularFile(

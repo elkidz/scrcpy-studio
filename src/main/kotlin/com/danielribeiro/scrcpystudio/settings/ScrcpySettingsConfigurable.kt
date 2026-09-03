@@ -9,6 +9,7 @@ import com.intellij.ui.components.JBTextField
 import com.intellij.ui.dsl.builder.*
 import java.io.File
 import java.util.concurrent.CompletableFuture
+import javax.swing.JCheckBox
 import javax.swing.JComponent
 import javax.swing.JFileChooser
 
@@ -20,6 +21,9 @@ class ScrcpySettingsConfigurable : Configurable {
     private lateinit var scrcpyPathField: JBTextField
     private lateinit var adbPathField: JBTextField
     private lateinit var recordingDirectoryField: JBTextField
+    private lateinit var autoOpenOnDeviceConnectCheckBox: JCheckBox
+    private lateinit var autoMirrorOnDeviceConnectCheckBox: JCheckBox
+    private lateinit var autoReconnectCheckBox: JCheckBox
     private lateinit var testButton: javax.swing.JButton
     private val statusLabel = JBLabel("Not tested")
     private var testFuture: CompletableFuture<*>? = null
@@ -58,6 +62,24 @@ class ScrcpySettingsConfigurable : Configurable {
             }
         }
 
+        group("Automation") {
+            row {
+                autoOpenOnDeviceConnectCheckBox = checkBox(
+                    "Open the Scrcpy Studio tool window when a device connects",
+                ).component
+            }
+            row {
+                autoMirrorOnDeviceConnectCheckBox = checkBox(
+                    "Automatically start mirroring for every newly connected device",
+                ).component
+            }
+            row {
+                autoReconnectCheckBox = checkBox(
+                    "Reconnect and resume mirroring when a device returns",
+                ).component
+            }
+        }
+
         row {
             testButton = button("Test configuration") {
                 testConfiguration()
@@ -74,7 +96,10 @@ class ScrcpySettingsConfigurable : Configurable {
         val state = settings.getState()
         return scrcpyPathField.text != state.scrcpyPath ||
             adbPathField.text != state.adbPath ||
-            recordingDirectoryField.text != state.recordingDirectory
+            recordingDirectoryField.text != state.recordingDirectory ||
+            autoOpenOnDeviceConnectCheckBox.isSelected != state.autoOpenOnDeviceConnect ||
+            autoMirrorOnDeviceConnectCheckBox.isSelected != state.autoMirrorOnDeviceConnect ||
+            autoReconnectCheckBox.isSelected != state.autoReconnect
     }
 
     override fun apply() {
@@ -82,6 +107,9 @@ class ScrcpySettingsConfigurable : Configurable {
             scrcpyPath = scrcpyPathField.text.trim()
             adbPath = adbPathField.text.trim()
             recordingDirectory = recordingDirectoryField.text.trim()
+            autoOpenOnDeviceConnect = autoOpenOnDeviceConnectCheckBox.isSelected
+            autoMirrorOnDeviceConnect = autoMirrorOnDeviceConnectCheckBox.isSelected
+            autoReconnect = autoReconnectCheckBox.isSelected
         }
     }
 
@@ -90,6 +118,9 @@ class ScrcpySettingsConfigurable : Configurable {
         scrcpyPathField.text = state.scrcpyPath
         adbPathField.text = state.adbPath
         recordingDirectoryField.text = state.recordingDirectory
+        autoOpenOnDeviceConnectCheckBox.isSelected = state.autoOpenOnDeviceConnect
+        autoMirrorOnDeviceConnectCheckBox.isSelected = state.autoMirrorOnDeviceConnect
+        autoReconnectCheckBox.isSelected = state.autoReconnect
         statusLabel.text = "Not tested"
     }
 

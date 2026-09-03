@@ -92,6 +92,33 @@ class ScrcpyProtocolSession internal constructor(
         }
     }
 
+    fun sendHome() {
+        if (stopped.get()) return
+        try {
+            controlWriter.home()
+        } catch (error: IOException) {
+            finish(error)
+        }
+    }
+
+    fun sendRecents() {
+        if (stopped.get()) return
+        try {
+            controlWriter.recents()
+        } catch (error: IOException) {
+            finish(error)
+        }
+    }
+
+    fun rotateDevice() {
+        if (stopped.get()) return
+        try {
+            controlWriter.rotateDevice()
+        } catch (error: IOException) {
+            finish(error)
+        }
+    }
+
     internal fun serverTerminated(exitCode: Int, output: String) {
         if (stopped.get()) return
         val details = output.trim().takeLast(512)

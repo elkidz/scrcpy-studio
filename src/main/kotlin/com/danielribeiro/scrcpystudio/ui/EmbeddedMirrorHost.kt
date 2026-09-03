@@ -107,7 +107,7 @@ class EmbeddedMirrorHost(
             graphics2D.color = Color.BLACK
             graphics2D.fillRect(0, 0, width, height)
 
-            if (currentState.mirrorMode == MirrorMode.EXTERNAL_FALLBACK &&
+            if (currentState.mirrorMode == MirrorMode.EXTERNAL &&
                 currentState.mirrorStatus == MirrorStatus.RUNNING
             ) {
                 drawCenteredMessage(graphics2D, "scrcpy is running in its external window.")

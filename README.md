@@ -2,8 +2,8 @@
 
 Scrcpy Studio is an Android Studio plugin for mirroring and controlling
 [`scrcpy`](https://github.com/Genymobile/scrcpy) devices in a tool window. It
-provides a Running Devices-style device list, one session tab per device, and
-an external-window fallback when the embedded protocol client cannot start.
+provides Running Devices-style tabs, device controls, and an external-window
+fallback when the embedded protocol client cannot start.
 
 ## Requirements
 
@@ -35,11 +35,19 @@ gradlew.bat verifyPlugin
 ```
 
 Inside the development IDE, open **Tools | Scrcpy Studio**, select a connected
-device, and click **Start mirroring**. The plugin starts a matching
-`scrcpy-server` over an ADB reverse tunnel, decodes the H.264 stream in-process,
-and paints it in the session tab. Mouse touch events and Escape/back are sent
-back through scrcpy's control socket. If the server, tunnel, or decoder cannot
-be started, the plugin falls back to a managed external scrcpy window.
+device tab, and click **Start mirroring**. Each connected device receives its
+own tab, with controls for rotation, screenshots, Android navigation, recording,
+and switching between the embedded view and an external scrcpy window. The
+plugin starts a matching `scrcpy-server` over an ADB reverse tunnel, decodes
+the H.264 stream in-process, and paints it in the tab. Mouse touch events and
+navigation controls are sent back through scrcpy's control socket when the
+embedded mode is active. Screenshots use `adb exec-out screencap -p`.
+
+The Automation settings can open the tool window, start mirroring for every
+newly connected device, and reconnect sessions when a device returns. The
+first device scan establishes a baseline, so already-connected devices are not
+started unexpectedly when a project opens. If the server, tunnel, or decoder
+cannot be started, the plugin falls back to a managed external scrcpy window.
 
 The protocol used by scrcpy is internal and version-coupled. The plugin reads
 the installed client version and starts the sibling server with that exact
@@ -60,7 +68,9 @@ Process execution uses IntelliJ's `GeneralCommandLine` and
 `OSProcessHandler`; user-provided paths and arguments are passed as separate
 process arguments and are never assembled into a shell command. The embedded
 video path uses a reverse ADB tunnel, scrcpy's 12-byte video packet framing,
-JCodec's pure-Java H.264 decoder, and a Swing renderer.
+JCodec's pure-Java H.264 decoder, and a Swing renderer. Binary screenshot
+capture uses a separate `ProcessBuilder` path so PNG bytes are not decoded as
+text.
 
 ## Licensing
 
