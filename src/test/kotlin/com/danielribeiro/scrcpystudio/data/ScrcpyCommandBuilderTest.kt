@@ -1,5 +1,6 @@
 package com.danielribeiro.scrcpystudio.data
 
+import com.danielribeiro.scrcpystudio.recording.RecordingOptions
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -34,7 +35,11 @@ class ScrcpyCommandBuilderTest {
 
     @Test
     fun recordingDisablesPlaybackAndWritesMp4() {
-        val command = builder.record(device, Paths.get("recordings", "capture.mp4"))
+        val command = builder.record(
+            device = device,
+            outputFile = Paths.get("recordings", "capture.mp4"),
+            options = RecordingOptions(showTaps = false),
+        )
 
         assertTrue(command.containsAll(listOf("--serial", device.serial)))
         assertTrue(command.contains("--no-window"))
@@ -45,5 +50,25 @@ class ScrcpyCommandBuilderTest {
             Paths.get("recordings", "capture.mp4").toString(),
             command[command.indexOf("--record") + 1],
         )
+    }
+
+    @Test
+    fun recordingAppliesScreenRecorderOptionsAndTimeLimit() {
+        val command = builder.record(
+            device = device,
+            outputFile = Paths.get("recordings", "capture.mp4"),
+            options = RecordingOptions(
+                bitrateMbps = 4,
+                resolutionPercent = 50,
+                showTaps = true,
+            ),
+            maxSize = 1200,
+        )
+
+        assertTrue(command.containsAll(listOf("--video-bit-rate", "4M")))
+        assertTrue(command.containsAll(listOf("--time-limit", "1800")))
+        assertTrue(command.containsAll(listOf("--max-size", "1200")))
+        assertTrue(command.contains("--show-touches"))
+        assertTrue(!command.contains("--no-control"))
     }
 }

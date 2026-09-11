@@ -55,12 +55,13 @@ the installed client version and starts the sibling server with that exact
 version. The current embedded client targets scrcpy 4.x and H.264 video; other
 versions or codecs use the external fallback.
 
-## Recording status
+## Recording
 
-The MP4 recording controls and command path are present, but recording stop and
-container finalization are intentionally not validated in this implementation
-pass. Do not treat recording as production-ready until that follow-up test is
-completed.
+Recording opens a screen recorder options dialog with bitrate, resolution,
+touch indicators, and the configured output directory. Recordings are limited
+to 30 minutes and are written as MP4 files. Stop recording sends scrcpy a
+graceful Ctrl+C/SIGINT request so the MP4 container can be finalized before the
+file is reported as complete.
 
 ## Architecture
 

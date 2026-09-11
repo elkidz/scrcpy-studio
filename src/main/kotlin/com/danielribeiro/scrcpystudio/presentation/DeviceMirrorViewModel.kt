@@ -2,6 +2,7 @@ package com.danielribeiro.scrcpystudio.presentation
 
 import com.danielribeiro.scrcpystudio.data.AndroidDevice
 import com.danielribeiro.scrcpystudio.protocol.ScrcpyVideoFrame
+import com.danielribeiro.scrcpystudio.recording.RecordingOptions
 import com.danielribeiro.scrcpystudio.session.MirrorSessionState
 import com.danielribeiro.scrcpystudio.session.ScrcpySessionService
 import com.intellij.openapi.Disposable
@@ -158,8 +159,12 @@ class DeviceMirrorViewModel(
         service.toggleMirrorMode(serial)
     }
 
-    fun startRecording(serial: String, outputFile: Path) {
-        service.startRecording(serial, outputFile)
+    fun startRecording(
+        serial: String,
+        outputFile: Path,
+        options: RecordingOptions = RecordingOptions(),
+    ) {
+        service.startRecording(serial, outputFile, options)
     }
 
     fun stopRecording(serial: String) {

@@ -39,6 +39,7 @@ class MirrorSessionPanel(
 
     private val errorLabel = JBLabel()
     private var currentState = MirrorSessionState(device, MirrorStatus.STOPPED)
+    private var recordingDialog: RecordingStatusDialog? = null
     private val powerButton = createScrcpyIconButton(
         icon = ScrcpyIcons.DevicePower,
         tooltip = "Power",
@@ -85,7 +86,7 @@ class MirrorSessionPanel(
             RecordingStatus.IDLE,
             RecordingStatus.COMPLETED,
             RecordingStatus.FAILED,
-            -> chooseRecordingFile()
+            -> showRecordingOptions()
         }
     }
     private val rotateButton = createScrcpyIconButton(
@@ -170,8 +171,23 @@ class MirrorSessionPanel(
 
     fun update(state: MirrorSessionState) {
         currentState = state
-        errorLabel.text = state.errorMessage.orEmpty()
-        errorLabel.isVisible = state.errorMessage != null
+        val errorMessage = state.errorMessage ?: state.recording.errorMessage
+        errorLabel.text = errorMessage.orEmpty()
+        errorLabel.isVisible = errorMessage != null
+        when (state.recording.status) {
+            RecordingStatus.STARTING,
+            RecordingStatus.RECORDING,
+            RecordingStatus.STOPPING,
+            -> recordingDialog?.updateStatus(state.recording.status)
+
+            RecordingStatus.IDLE,
+            RecordingStatus.COMPLETED,
+            RecordingStatus.FAILED,
+            -> {
+                recordingDialog?.closeAfterStop()
+                recordingDialog = null
+            }
+        }
 
         val startStopTooltip = when (state.mirrorStatus) {
             MirrorStatus.STARTING,
@@ -227,7 +243,10 @@ class MirrorSessionPanel(
             tooltip = recordTooltip,
         )
         recordButton.isEnabled = state.mirrorStatus == MirrorStatus.RUNNING &&
-            state.recording.status != RecordingStatus.STOPPING
+            state.recording.status !in setOf(
+                RecordingStatus.STARTING,
+                RecordingStatus.STOPPING,
+            )
 
         val isRunning = state.mirrorStatus == MirrorStatus.RUNNING
         val canControl = state.device.canMirror && isRunning
@@ -269,6 +288,8 @@ class MirrorSessionPanel(
     }
 
     override fun dispose() {
+        recordingDialog?.closeAfterStop()
+        recordingDialog = null
         mirrorHost.dispose()
     }
 
@@ -318,31 +339,47 @@ class MirrorSessionPanel(
         ScrcpyOptionsPopup.show(optionsButton.component, viewModel)
     }
 
-    private fun chooseRecordingFile() {
-        val configuredDirectory = ScrcpySettingsState.getInstance()
+    private fun showRecordingOptions() {
+        val configuredDirectory = configuredRecordingDirectory()
+        val dialog = RecordingOptionsDialog(
+            project = project,
+            initialDirectory = configuredDirectory,
+            outputDirectoryProvider = ::configuredRecordingDirectory,
+        ) {
+            ShowSettingsUtil.getInstance()
+                .showSettingsDialog(project, ScrcpySettingsConfigurable::class.java)
+        }
+        if (!dialog.showAndGet()) return
+
+        val options = dialog.recordingOptions ?: return
+        val outputDirectory = dialog.selectedOutputDirectory()
+        val outputFile = RecordingFileNamer.nextFile(
+            directory = outputDirectory,
+            device = device,
+        )
+        val statusDialog = RecordingStatusDialog(
+            project = project,
+            device = device,
+        ) {
+            viewModel.stopRecording(device.serial)
+        }
+        recordingDialog?.closeAfterStop()
+        recordingDialog = statusDialog
+        statusDialog.show()
+        viewModel.startRecording(
+            serial = device.serial,
+            outputFile = outputFile,
+            options = options,
+        )
+    }
+
+    private fun configuredRecordingDirectory(): Path =
+        ScrcpySettingsState.getInstance()
             .getState()
             .recordingDirectory
             .takeIf(String::isNotBlank)
             ?.let(Paths::get)
             ?: Paths.get(System.getProperty("user.home"), "Videos", "Scrcpy Studio")
-        val currentDirectory = configuredDirectory
-            .takeIf { Files.isDirectory(it) }
-            ?: Paths.get(System.getProperty("user.home"))
-        val suggestedFile = RecordingFileNamer.nextFile(
-            directory = configuredDirectory,
-            device = device,
-        )
-
-        val chooser = JFileChooser(currentDirectory.toFile()).apply {
-            dialogTitle = "Save scrcpy recording"
-            selectedFile = suggestedFile.toFile()
-            fileFilter = FileNameExtensionFilter("MP4 video (*.mp4)", "mp4")
-        }
-        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return
-
-        val selected = chooser.selectedFile.toPath().let(::ensureMp4Extension)
-        viewModel.startRecording(device.serial, selected)
-    }
 
     private fun chooseScreenshotFile() {
         val directory = Paths.get(
@@ -365,13 +402,6 @@ class MirrorSessionPanel(
         val selected = chooser.selectedFile.toPath().let(::ensurePngExtension)
         viewModel.takeScreenshot(device.serial, selected)
     }
-
-    private fun ensureMp4Extension(file: Path): Path =
-        if (file.fileName.toString().endsWith(".mp4", ignoreCase = true)) {
-            file
-        } else {
-            file.resolveSibling("${file.fileName}.mp4")
-        }
 
     private fun ensurePngExtension(file: Path): Path =
         if (file.fileName.toString().endsWith(".png", ignoreCase = true)) {

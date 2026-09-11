@@ -1,6 +1,7 @@
 package com.danielribeiro.scrcpystudio.process
 
 import com.intellij.execution.configurations.GeneralCommandLine
+import com.intellij.execution.process.OSProcessUtil
 import com.intellij.execution.process.OSProcessHandler
 import com.intellij.execution.process.ProcessEvent
 import com.intellij.execution.process.ProcessListener
@@ -33,6 +34,7 @@ class ManagedProcess internal constructor(
     internal val handler: OSProcessHandler,
     private val output: StringBuilder,
     private val outputLimit: Int,
+    private val gracefulOnDispose: Boolean,
 ) : Disposable {
 
     val isRunning: Boolean
@@ -44,12 +46,33 @@ class ManagedProcess internal constructor(
         }
     }
 
+    /**
+     * Requests the process' interrupt path so applications can flush files and
+     * run their normal shutdown handlers. This is Ctrl+C on Windows and SIGINT
+     * on Unix-like systems.
+     */
+    fun stopGracefully(): Boolean {
+        if (!isRunning) return true
+        return try {
+            OSProcessUtil.terminateProcessGracefully(handler.process)
+            true
+        } catch (_: RuntimeException) {
+            false
+        }
+    }
+
     fun outputSnapshot(): String = synchronized(output) {
         output.toString()
     }
 
     override fun dispose() {
-        stop()
+        if (gracefulOnDispose) {
+            if (!stopGracefully()) {
+                stop()
+            }
+        } else {
+            stop()
+        }
     }
 
     internal fun appendOutput(text: String) {
@@ -70,6 +93,7 @@ class ProcessRunner(
         environment: Map<String, String> = emptyMap(),
         workingDirectory: Path? = null,
         parentDisposable: Disposable? = null,
+        gracefulOnDispose: Boolean = false,
         onOutput: (String) -> Unit = {},
         onTerminated: (exitCode: Int, output: String) -> Unit = { _, _ -> },
     ): ManagedProcess {
@@ -87,6 +111,7 @@ class ProcessRunner(
             handler = handler,
             output = output,
             outputLimit = outputLimit,
+            gracefulOnDispose = gracefulOnDispose,
         )
         val listener = object : ProcessListener {
             override fun startNotified(event: ProcessEvent) = Unit

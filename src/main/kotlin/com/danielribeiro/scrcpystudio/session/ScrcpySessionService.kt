@@ -10,6 +10,7 @@ import com.danielribeiro.scrcpystudio.protocol.ScrcpyProtocolException
 import com.danielribeiro.scrcpystudio.protocol.ScrcpyProtocolRepository
 import com.danielribeiro.scrcpystudio.protocol.ScrcpyProtocolSession
 import com.danielribeiro.scrcpystudio.protocol.ScrcpyVideoFrame
+import com.danielribeiro.scrcpystudio.recording.RecordingOptions
 import com.danielribeiro.scrcpystudio.screenshot.ScreenshotRepository
 import com.danielribeiro.scrcpystudio.settings.ExecutableResolver
 import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsState
@@ -38,6 +39,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.awt.datatransfer.StringSelection
@@ -559,7 +561,11 @@ class ScrcpySessionService(
     private fun isDeviceAvailable(serial: String): Boolean =
         _devices.value.any { it.serial == serial && it.canMirror }
 
-    fun startRecording(serial: String, outputFile: Path) {
+    fun startRecording(
+        serial: String,
+        outputFile: Path,
+        options: RecordingOptions = RecordingOptions(),
+    ) {
         scope.launch(Dispatchers.IO) {
             val session = _sessions.value[serial]
             if (session == null || session.mirrorStatus != MirrorStatus.RUNNING) {
@@ -583,9 +589,23 @@ class ScrcpySessionService(
                     ),
                 )
 
+                val maxSize = if (options.resolutionPercent == RecordingOptions.DEFAULT_RESOLUTION_PERCENT) {
+                    null
+                } else {
+                    val displaySize = try {
+                        adbRepository.displaySize(serial)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (_: Exception) {
+                        null
+                    }
+                    displaySize?.scaledMaxDimension(options.resolutionPercent)
+                }
                 val process = scrcpyRepository.startRecording(
                     device = session.device,
                     outputFile = normalizedOutput,
+                    options = options,
+                    maxSize = maxSize,
                     parentDisposable = this@ScrcpySessionService,
                     onTerminated = { exitCode, output ->
                         handleRecordingTerminated(
@@ -635,7 +655,7 @@ class ScrcpySessionService(
         scope.cancel()
         mirrorProcesses.values.forEach(ManagedProcess::stop)
         protocolSessions.values.forEach(ScrcpyProtocolSession::dispose)
-        recordingProcesses.values.forEach(ManagedProcess::stop)
+        recordingProcesses.values.forEach { it.stopGracefully() }
         mirrorProcesses.clear()
         protocolSessions.clear()
         recordingProcesses.clear()
@@ -761,7 +781,7 @@ class ScrcpySessionService(
         output: String,
     ) {
         mirrorProcesses.remove(device.serial)?.dispose()
-        stopRecordingInternal(device.serial)
+        requestRecordingStop(device.serial)
 
         val wasStopping = _sessions.value[device.serial]?.mirrorStatus == MirrorStatus.STOPPING
         val failed = !wasStopping && exitCode != 0
@@ -788,7 +808,7 @@ class ScrcpySessionService(
             return
         }
 
-        stopRecordingInternal(device.serial)
+        requestRecordingStop(device.serial)
 
         val wasStopping = _sessions.value[device.serial]?.mirrorStatus == MirrorStatus.STOPPING
         if (wasStopping) {
@@ -817,7 +837,11 @@ class ScrcpySessionService(
         val hasOutput = runCatching {
             Files.isRegularFile(outputFile) && Files.size(outputFile) > 0
         }.getOrDefault(false)
-        val successful = hasOutput && (exitCode == 0 || exitCode == -1)
+        val successful = hasOutput && (
+            exitCode == 0 ||
+                exitCode == -1 ||
+                exitCode == WINDOWS_CONTROL_C_EXIT_CODE
+            )
         updateRecording(
             serial = serial,
             recording = RecordingState(
@@ -832,8 +856,28 @@ class ScrcpySessionService(
         )
     }
 
-    private fun stopRecordingInternal(serial: String) {
-        recordingProcesses.remove(serial)?.dispose()
+    private suspend fun stopRecordingInternal(serial: String) {
+        val process = recordingProcesses[serial] ?: return
+        if (!process.stopGracefully()) {
+            process.stop()
+            return
+        }
+
+        withTimeoutOrNull(RECORDING_STOP_TIMEOUT_MS) {
+            while (process.isRunning) {
+                delay(RECORDING_STOP_POLL_INTERVAL_MS)
+            }
+        }
+        if (process.isRunning) {
+            process.stop()
+            recordingProcesses.remove(serial, process)
+        }
+    }
+
+    private fun requestRecordingStop(serial: String) {
+        scope.launch(Dispatchers.IO) {
+            stopRecordingInternal(serial)
+        }
     }
 
     private fun updateSession(
@@ -922,5 +966,7 @@ class ScrcpySessionService(
         private const val DISPLAY_ROTATIONS = 4
         private const val AUTO_START_ATTEMPTS = 3
         private val AUTO_START_BACKOFF_MS = longArrayOf(500L, 1_000L)
+        private const val RECORDING_STOP_TIMEOUT_MS = 5_000L
+        private const val RECORDING_STOP_POLL_INTERVAL_MS = 50L
     }
 }

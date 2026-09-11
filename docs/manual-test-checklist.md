@@ -53,15 +53,15 @@ IntelliJ IDEA or Android Studio build (`251+`).
 - [ ] Toggle from embedded mode to the external scrcpy window and back.
 - [ ] Confirm the external scrcpy window uses a normal framed window (not borderless).
 - [ ] Confirm navigation and screenshot actions work while external mode is active.
-- [ ] Confirm the existing Start recording button remains available without
-      changing its current behavior.
 
 ## Recording follow-up
 
 - [ ] Validate the selected output path and generated MP4 filename.
+- [ ] Open the Screen Recorder Options dialog and verify bitrate, resolution,
+      Show taps, output directory, Configure, Start Recording, Cancel, and Help.
+- [ ] Start recording and verify the non-modal Record Screen status dialog shows
+      elapsed time and a Stop Recording button.
 - [ ] Start and stop recording from an active mirror.
 - [ ] Open the resulting MP4 and seek through it.
+- [ ] Confirm stopping a recording waits for scrcpy to finalize the MP4.
 - [ ] Stop the IDE while recording and confirm the output behavior is documented.
-
-Recording checks are intentionally deferred from the current implementation
-pass.
