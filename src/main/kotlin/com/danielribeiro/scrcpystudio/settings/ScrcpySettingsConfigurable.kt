@@ -21,7 +21,6 @@ class ScrcpySettingsConfigurable : Configurable {
     private lateinit var scrcpyPathField: JBTextField
     private lateinit var adbPathField: JBTextField
     private lateinit var recordingDirectoryField: JBTextField
-    private lateinit var autoOpenOnDeviceConnectCheckBox: JCheckBox
     private lateinit var autoMirrorOnDeviceConnectCheckBox: JCheckBox
     private lateinit var autoReconnectCheckBox: JCheckBox
     private lateinit var testButton: javax.swing.JButton
@@ -64,11 +63,6 @@ class ScrcpySettingsConfigurable : Configurable {
 
         group("Automation") {
             row {
-                autoOpenOnDeviceConnectCheckBox = checkBox(
-                    "Open the Scrcpy Studio tool window when a device connects",
-                ).component
-            }
-            row {
                 autoMirrorOnDeviceConnectCheckBox = checkBox(
                     "Automatically start mirroring for every newly connected device",
                 ).component
@@ -97,7 +91,6 @@ class ScrcpySettingsConfigurable : Configurable {
         return scrcpyPathField.text != state.scrcpyPath ||
             adbPathField.text != state.adbPath ||
             recordingDirectoryField.text != state.recordingDirectory ||
-            autoOpenOnDeviceConnectCheckBox.isSelected != state.autoOpenOnDeviceConnect ||
             autoMirrorOnDeviceConnectCheckBox.isSelected != state.autoMirrorOnDeviceConnect ||
             autoReconnectCheckBox.isSelected != state.autoReconnect
     }
@@ -107,7 +100,6 @@ class ScrcpySettingsConfigurable : Configurable {
             scrcpyPath = scrcpyPathField.text.trim()
             adbPath = adbPathField.text.trim()
             recordingDirectory = recordingDirectoryField.text.trim()
-            autoOpenOnDeviceConnect = autoOpenOnDeviceConnectCheckBox.isSelected
             autoMirrorOnDeviceConnect = autoMirrorOnDeviceConnectCheckBox.isSelected
             autoReconnect = autoReconnectCheckBox.isSelected
         }
@@ -118,7 +110,6 @@ class ScrcpySettingsConfigurable : Configurable {
         scrcpyPathField.text = state.scrcpyPath
         adbPathField.text = state.adbPath
         recordingDirectoryField.text = state.recordingDirectory
-        autoOpenOnDeviceConnectCheckBox.isSelected = state.autoOpenOnDeviceConnect
         autoMirrorOnDeviceConnectCheckBox.isSelected = state.autoMirrorOnDeviceConnect
         autoReconnectCheckBox.isSelected = state.autoReconnect
         statusLabel.text = "Not tested"

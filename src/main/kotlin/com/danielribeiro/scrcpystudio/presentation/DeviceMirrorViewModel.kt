@@ -65,6 +65,31 @@ class DeviceMirrorViewModel(
         _selectedSerial.value = serial
     }
 
+    fun startMirrorsForConnectedDevices() {
+        service.startMirrorsForConnectedDevices()
+    }
+
+    fun restartRunningMirrors() {
+        service.restartRunningMirrors()
+    }
+
+    fun sendKeyEvent(
+        serial: String,
+        action: Int,
+        keycode: Int,
+        metastate: Int = 0,
+    ) {
+        service.sendKeyEvent(serial, action, keycode, metastate)
+    }
+
+    fun pasteHostClipboard(serial: String, text: String) {
+        service.pasteHostClipboard(serial, text)
+    }
+
+    fun copyDeviceClipboard(serial: String) {
+        service.copyDeviceClipboard(serial)
+    }
+
     fun startMirror(serial: String) {
         service.startMirror(serial)
     }
@@ -107,6 +132,18 @@ class DeviceMirrorViewModel(
 
     fun sendRecents(serial: String) {
         service.sendRecents(serial)
+    }
+
+    fun sendPower(serial: String) {
+        service.sendPower(serial)
+    }
+
+    fun sendVolumeUp(serial: String) {
+        service.sendVolumeUp(serial)
+    }
+
+    fun sendVolumeDown(serial: String) {
+        service.sendVolumeDown(serial)
     }
 
     fun rotate(serial: String) {

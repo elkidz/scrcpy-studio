@@ -1,11 +1,14 @@
 package com.danielribeiro.scrcpystudio.ui
 
 import com.danielribeiro.scrcpystudio.data.AndroidDevice
+import com.danielribeiro.scrcpystudio.input.AndroidKeyMapper
 import com.danielribeiro.scrcpystudio.presentation.DeviceMirrorViewModel
+import com.danielribeiro.scrcpystudio.protocol.ScrcpyControlWriter
 import com.danielribeiro.scrcpystudio.session.MirrorMode
 import com.danielribeiro.scrcpystudio.session.MirrorSessionState
 import com.danielribeiro.scrcpystudio.session.MirrorStatus
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.ui.JBColor
 import com.intellij.util.ui.JBUI
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +26,7 @@ import java.awt.Graphics2D
 import java.awt.RenderingHints
 import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
+import java.awt.datatransfer.DataFlavor
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import java.awt.image.BufferedImage
@@ -81,9 +85,11 @@ class EmbeddedMirrorHost(
         addKeyListener(
             object : KeyAdapter() {
                 override fun keyPressed(event: KeyEvent) {
-                    if (event.keyCode == KeyEvent.VK_ESCAPE) {
-                        viewModel.sendBack(device.serial)
-                    }
+                    handleKey(event, ScrcpyControlWriter.KEY_ACTION_DOWN)
+                }
+
+                override fun keyReleased(event: KeyEvent) {
+                    handleKey(event, ScrcpyControlWriter.KEY_ACTION_UP)
                 }
             },
         )
@@ -150,6 +156,50 @@ class EmbeddedMirrorHost(
         scope.cancel()
         latestFrame.set(null)
         displayedFrame = null
+    }
+
+    private fun handleKey(event: KeyEvent, action: Int) {
+        if (currentState.mirrorStatus != MirrorStatus.RUNNING ||
+            currentState.mirrorMode != MirrorMode.EMBEDDED
+        ) {
+            return
+        }
+        if (AndroidKeyMapper.isPasteShortcut(event)) {
+            if (action == ScrcpyControlWriter.KEY_ACTION_DOWN) {
+                val text = runCatching {
+                    CopyPasteManager.getInstance()
+                        .contents
+                        ?.getTransferData(DataFlavor.stringFlavor) as? String
+                }.getOrNull()
+                if (!text.isNullOrEmpty()) {
+                    viewModel.pasteHostClipboard(device.serial, text)
+                }
+            }
+            event.consume()
+            return
+        }
+        if (AndroidKeyMapper.isCopyShortcut(event)) {
+            if (action == ScrcpyControlWriter.KEY_ACTION_DOWN) {
+                viewModel.copyDeviceClipboard(device.serial)
+            }
+            event.consume()
+            return
+        }
+        if (event.keyCode == KeyEvent.VK_ESCAPE &&
+            action == ScrcpyControlWriter.KEY_ACTION_DOWN
+        ) {
+            viewModel.sendBack(device.serial)
+            event.consume()
+            return
+        }
+        val keycode = AndroidKeyMapper.androidKeyCode(event) ?: return
+        viewModel.sendKeyEvent(
+            serial = device.serial,
+            action = action,
+            keycode = keycode,
+            metastate = AndroidKeyMapper.metastate(event),
+        )
+        event.consume()
     }
 
     private fun sendTouch(

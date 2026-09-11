@@ -21,7 +21,11 @@ class ScrcpyCommandBuilderTest {
         val command = builder.mirror(device)
 
         assertEquals("tools${java.io.File.separator}scrcpy.exe", command[0])
-        assertTrue(command.containsAll(listOf("--serial", device.serial, "--window-borderless")))
+        assertTrue(command.containsAll(listOf("--serial", device.serial, "--window-title")))
+        assertEquals(false, command.contains("--window-borderless"))
+        assertTrue(command.containsAll(listOf("--max-size", "1920")))
+        assertTrue(command.containsAll(listOf("--max-fps", "30")))
+        assertTrue(command.containsAll(listOf("--video-codec", "h264")))
         assertEquals(
             listOf("--window-title", "Scrcpy Studio - ${device.serial}"),
             command.dropWhile { it != "--window-title" }.take(2),

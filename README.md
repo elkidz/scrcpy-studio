@@ -35,19 +35,20 @@ gradlew.bat verifyPlugin
 ```
 
 Inside the development IDE, open **Tools | Scrcpy Studio**, select a connected
-device tab, and click **Start mirroring**. Each connected device receives its
-own tab, with controls for rotation, screenshots, Android navigation, recording,
-and switching between the embedded view and an external scrcpy window. The
-plugin starts a matching `scrcpy-server` over an ADB reverse tunnel, decodes
-the H.264 stream in-process, and paints it in the tab. Mouse touch events and
-navigation controls are sent back through scrcpy's control socket when the
-embedded mode is active. Screenshots use `adb exec-out screencap -p`.
+device tab, and use the compact icon toolbar to start mirroring, rotate the
+display, capture screenshots, send Android navigation keys, record, and switch
+between the embedded view and a normal external scrcpy window. Each connected
+device receives its own tab. The plugin starts a matching `scrcpy-server` over
+an ADB reverse tunnel, decodes the H.264 stream in-process, and paints it in
+the tab. Mouse touch events and navigation controls are sent back through
+scrcpy's control socket when the embedded mode is active. Screenshots use
+`adb exec-out screencap -p`.
 
-The Automation settings can open the tool window, start mirroring for every
-newly connected device, and reconnect sessions when a device returns. The
-first device scan establishes a baseline, so already-connected devices are not
-started unexpectedly when a project opens. If the server, tunnel, or decoder
-cannot be started, the plugin falls back to a managed external scrcpy window.
+The Automation settings can start mirroring for every newly connected device
+and reconnect sessions when a device returns. The first device scan establishes
+a baseline, so already-connected devices are not started unexpectedly when a
+project opens. If the server, tunnel, or decoder cannot be started, the plugin
+falls back to a managed external scrcpy window with a standard window frame.
 
 The protocol used by scrcpy is internal and version-coupled. The plugin reads
 the installed client version and starts the sibling server with that exact

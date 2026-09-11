@@ -14,9 +14,9 @@ import com.danielribeiro.scrcpystudio.screenshot.ScreenshotRepository
 import com.danielribeiro.scrcpystudio.settings.ExecutableResolver
 import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsState
 import com.intellij.openapi.Disposable
-import com.intellij.openapi.components.Service
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.ide.CopyPasteManager
 import com.intellij.openapi.project.Project
-import com.intellij.openapi.wm.ToolWindowManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -40,12 +40,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.awt.datatransfer.StringSelection
 import java.awt.image.BufferedImage
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.ConcurrentHashMap
 
-@Service(Service.Level.PROJECT)
 class ScrcpySessionService(
     private val project: Project,
 ) : Disposable {
@@ -182,6 +182,9 @@ class ScrcpySessionService(
                         onTerminated = { error ->
                             handleProtocolTerminated(device, error)
                         },
+                        onClipboard = { text ->
+                            handleDeviceClipboard(text)
+                        },
                     )
                     candidateProtocolSession = protocolSession
                     currentCoroutineContext().ensureActive()
@@ -271,6 +274,62 @@ class ScrcpySessionService(
                 modeMessage = null,
             )
         }
+    }
+
+    fun startMirrorsForConnectedDevices() {
+        if (!settings.getState().autoMirrorOnDeviceConnect) return
+        _devices.value
+            .filter(AndroidDevice::canMirror)
+            .forEach { device ->
+                val status = _sessions.value[device.serial]?.mirrorStatus
+                if (status == MirrorStatus.RUNNING || status == MirrorStatus.STARTING) {
+                    return@forEach
+                }
+                scheduleAutomaticStart(
+                    serial = device.serial,
+                    mode = preferredModes[device.serial] ?: MirrorMode.EMBEDDED,
+                    retry = true,
+                )
+            }
+    }
+
+    fun restartRunningMirrors() {
+        scope.launch(Dispatchers.IO) {
+            val serials = _sessions.value
+                .filter { (_, session) ->
+                    session.mirrorStatus == MirrorStatus.RUNNING ||
+                        session.mirrorStatus == MirrorStatus.STARTING
+                }
+                .keys
+                .toList()
+            serials.forEach { serial ->
+                val mode = preferredModes[serial]
+                    ?: _sessions.value[serial]?.mirrorMode
+                    ?: MirrorMode.EMBEDDED
+                stopMirrorInternal(serial, cancelAutoStart = true)
+                startMirror(serial, requestedMode = mode)?.join()
+            }
+        }
+    }
+
+    fun sendKeyEvent(
+        serial: String,
+        action: Int,
+        keycode: Int,
+        metastate: Int = 0,
+    ) {
+        if (!settings.getState().keyboardInput) return
+        protocolSessions[serial]?.sendKeyEvent(action, keycode, metastate)
+    }
+
+    fun pasteHostClipboard(serial: String, text: String) {
+        if (!settings.getState().clipboardSync) return
+        protocolSessions[serial]?.pasteText(text)
+    }
+
+    fun copyDeviceClipboard(serial: String) {
+        if (!settings.getState().clipboardSync) return
+        protocolSessions[serial]?.requestClipboard()
     }
 
     fun stopMirror(serial: String) {
@@ -366,17 +425,29 @@ class ScrcpySessionService(
 
     fun sendBack(serial: String) {
         protocolSessions[serial]?.sendBack()
-            ?: sendExternalKeyevent(serial, ScrcpyControlWriter.KEYCODE_BACK)
+            ?: sendNavigationKeyevent(serial, ScrcpyControlWriter.KEYCODE_BACK)
     }
 
     fun sendHome(serial: String) {
         protocolSessions[serial]?.sendHome()
-            ?: sendExternalKeyevent(serial, ScrcpyControlWriter.KEYCODE_HOME)
+            ?: sendNavigationKeyevent(serial, ScrcpyControlWriter.KEYCODE_HOME)
     }
 
     fun sendRecents(serial: String) {
         protocolSessions[serial]?.sendRecents()
-            ?: sendExternalKeyevent(serial, ScrcpyControlWriter.KEYCODE_APP_SWITCH)
+            ?: sendNavigationKeyevent(serial, ScrcpyControlWriter.KEYCODE_APP_SWITCH)
+    }
+
+    fun sendPower(serial: String) {
+        sendHardwareKeyevent(serial, ScrcpyControlWriter.KEYCODE_POWER)
+    }
+
+    fun sendVolumeUp(serial: String) {
+        sendHardwareKeyevent(serial, ScrcpyControlWriter.KEYCODE_VOLUME_UP)
+    }
+
+    fun sendVolumeDown(serial: String) {
+        sendHardwareKeyevent(serial, ScrcpyControlWriter.KEYCODE_VOLUME_DOWN)
     }
 
     fun rotate(serial: String) {
@@ -444,7 +515,7 @@ class ScrcpySessionService(
         }
     }
 
-    private fun sendExternalKeyevent(
+    private fun sendNavigationKeyevent(
         serial: String,
         keycode: Int,
     ) {
@@ -452,14 +523,41 @@ class ScrcpySessionService(
             _lastError.value = "Start mirroring before using device navigation."
             return
         }
+        sendAdbKeyevent(serial, keycode, "Unable to send the device navigation command.")
+    }
+
+    private fun sendHardwareKeyevent(
+        serial: String,
+        keycode: Int,
+    ) {
+        if (!isDeviceAvailable(serial)) {
+            _lastError.value = "The selected device is not available."
+            return
+        }
+        val protocolSession = protocolSessions[serial]
+        if (protocolSession != null) {
+            protocolSession.sendKeyPress(keycode)
+            return
+        }
+        sendAdbKeyevent(serial, keycode, "Unable to send the device hardware command.")
+    }
+
+    private fun sendAdbKeyevent(
+        serial: String,
+        keycode: Int,
+        failureMessage: String,
+    ) {
         scope.launch(Dispatchers.IO) {
             runCatching {
                 adbRepository.sendKeyevent(serial, keycode)
             }.onFailure { error ->
-                _lastError.value = error.message ?: "Unable to send the device navigation command."
+                _lastError.value = error.message ?: failureMessage
             }
         }
     }
+
+    private fun isDeviceAvailable(serial: String): Boolean =
+        _devices.value.any { it.serial == serial && it.canMirror }
 
     fun startRecording(serial: String, outputFile: Path) {
         scope.launch(Dispatchers.IO) {
@@ -593,7 +691,6 @@ class ScrcpySessionService(
         diff.connected
             .filter(AndroidDevice::canMirror)
             .forEach { device ->
-                showToolWindowIfConfigured()
                 val reconnectMode = reconnectIntents[device.serial]
                 if (reconnectMode != null) {
                     if (settings.getState().autoReconnect) {
@@ -613,17 +710,6 @@ class ScrcpySessionService(
                     )
                 }
             }
-    }
-
-    private fun showToolWindowIfConfigured() {
-        if (!settings.getState().autoOpenOnDeviceConnect) return
-        ToolWindowManager.getInstance(project).invokeLater {
-            val toolWindow = ToolWindowManager.getInstance(project)
-                .getToolWindow(TOOL_WINDOW_ID)
-            if (toolWindow?.isAvailable == true && !toolWindow.isVisible) {
-                toolWindow.show()
-            }
-        }
     }
 
     private fun scheduleAutomaticStart(
@@ -659,6 +745,13 @@ class ScrcpySessionService(
             job.start()
         } else {
             job.cancel()
+        }
+    }
+
+    private fun handleDeviceClipboard(text: String) {
+        if (!settings.getState().clipboardSync || text.isEmpty()) return
+        ApplicationManager.getApplication().invokeLater {
+            CopyPasteManager.getInstance().setContents(StringSelection(text))
         }
     }
 
@@ -828,7 +921,6 @@ class ScrcpySessionService(
         private const val WINDOWS_CONTROL_C_EXIT_CODE = -1_073_741_510
         private const val DISPLAY_ROTATIONS = 4
         private const val AUTO_START_ATTEMPTS = 3
-        private const val TOOL_WINDOW_ID = "Scrcpy Studio"
         private val AUTO_START_BACKOFF_MS = longArrayOf(500L, 1_000L)
     }
 }

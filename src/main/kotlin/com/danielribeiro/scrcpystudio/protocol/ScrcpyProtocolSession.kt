@@ -28,6 +28,7 @@ class ScrcpyProtocolSession internal constructor(
     private val processRunner: ProcessRunner,
     private val onFrame: (BufferedImage) -> Unit,
     private val onTerminated: (Throwable?) -> Unit,
+    private val onClipboard: (String) -> Unit = {},
 ) : Disposable {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -86,7 +87,7 @@ class ScrcpyProtocolSession internal constructor(
     fun sendBack() {
         if (stopped.get()) return
         try {
-            controlWriter.back()
+            controlWriter.pressBack()
         } catch (error: IOException) {
             finish(error)
         }
@@ -95,7 +96,7 @@ class ScrcpyProtocolSession internal constructor(
     fun sendHome() {
         if (stopped.get()) return
         try {
-            controlWriter.home()
+            controlWriter.pressHome()
         } catch (error: IOException) {
             finish(error)
         }
@@ -104,7 +105,43 @@ class ScrcpyProtocolSession internal constructor(
     fun sendRecents() {
         if (stopped.get()) return
         try {
-            controlWriter.recents()
+            controlWriter.pressRecents()
+        } catch (error: IOException) {
+            finish(error)
+        }
+    }
+
+    fun sendKeyPress(keycode: Int) {
+        if (stopped.get()) return
+        try {
+            controlWriter.pressKeycode(keycode)
+        } catch (error: IOException) {
+            finish(error)
+        }
+    }
+
+    fun sendKeyEvent(action: Int, keycode: Int, metastate: Int = 0) {
+        if (stopped.get()) return
+        try {
+            controlWriter.injectKeycode(action, keycode, metastate = metastate)
+        } catch (error: IOException) {
+            finish(error)
+        }
+    }
+
+    fun pasteText(text: String) {
+        if (stopped.get() || text.isEmpty()) return
+        try {
+            controlWriter.setClipboard(text, paste = true)
+        } catch (error: IOException) {
+            finish(error)
+        }
+    }
+
+    fun requestClipboard() {
+        if (stopped.get()) return
+        try {
+            controlWriter.getClipboard()
         } catch (error: IOException) {
             finish(error)
         }
@@ -178,15 +215,45 @@ class ScrcpyProtocolSession internal constructor(
 
     private suspend fun drainDeviceMessages() {
         val input = runCatching {
-            controlSocket.getInputStream()
+            DataInputStream(controlSocket.getInputStream())
         }.getOrNull() ?: return
-        val buffer = ByteArray(8 * 1024)
 
         try {
             while (!stopped.get()) {
-                if (input.read(buffer) == -1) {
-                    finish(null)
-                    return
+                val type = input.readUnsignedByte()
+                when (type) {
+                    ScrcpyControlWriter.DEVICE_MSG_CLIPBOARD -> {
+                        val length = input.readInt()
+                        if (length < 0 || length > MAX_CLIPBOARD_BYTES) {
+                            finish(ScrcpyProtocolException("Invalid clipboard payload length: $length"))
+                            return
+                        }
+                        val payload = ByteArray(length)
+                        input.readFully(payload)
+                        onClipboard(payload.toString(Charsets.UTF_8))
+                    }
+
+                    DEVICE_MSG_ACK_CLIPBOARD -> {
+                        input.readLong()
+                    }
+
+                    DEVICE_MSG_UHID_OUTPUT -> {
+                        input.readUnsignedShort()
+                        val size = input.readUnsignedShort()
+                        if (size < 0 || size > MAX_UHID_BYTES) {
+                            finish(ScrcpyProtocolException("Invalid UHID payload length: $size"))
+                            return
+                        }
+                        input.readFully(ByteArray(size))
+                    }
+
+                    else -> {
+                        val discarded = input.read()
+                        if (discarded == -1) {
+                            finish(null)
+                            return
+                        }
+                    }
                 }
             }
         } catch (error: IOException) {
@@ -235,5 +302,12 @@ class ScrcpyProtocolSession internal constructor(
 
     private fun closeQuietly(socket: Socket) {
         runCatching { socket.close() }
+    }
+
+    private companion object {
+        const val DEVICE_MSG_ACK_CLIPBOARD = 1
+        const val DEVICE_MSG_UHID_OUTPUT = 2
+        const val MAX_CLIPBOARD_BYTES = 1 shl 18
+        const val MAX_UHID_BYTES = 1 shl 16
     }
 }

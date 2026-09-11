@@ -4,6 +4,7 @@ import com.danielribeiro.scrcpystudio.data.AndroidDevice
 import com.danielribeiro.scrcpystudio.process.ManagedProcess
 import com.danielribeiro.scrcpystudio.process.ProcessRunner
 import com.danielribeiro.scrcpystudio.settings.ExecutableResolver
+import com.danielribeiro.scrcpystudio.settings.ScrcpyMirrorOptions
 import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsState
 import com.intellij.openapi.Disposable
 import kotlinx.coroutines.delay
@@ -28,6 +29,7 @@ class ScrcpyProtocolRepository(
         onFrame: (java.awt.image.BufferedImage) -> Unit,
         onTerminated: (Throwable?) -> Unit,
         onOutput: (String) -> Unit = {},
+        onClipboard: (String) -> Unit = {},
     ): ScrcpyProtocolSession {
         val tools = executableResolver.resolve(settings.getState())
         val server = tools.scrcpyServer
@@ -83,6 +85,7 @@ class ScrcpyProtocolRepository(
                 serverVersion = version,
                 scid = scid,
                 remoteServerPath = remoteServerPath,
+                options = ScrcpyMirrorOptions.from(settings.getState()),
             )
             serverProcess = processRunner.start(
                 command = serverCommand,
@@ -130,6 +133,7 @@ class ScrcpyProtocolRepository(
                 processRunner = processRunner,
                 onFrame = onFrame,
                 onTerminated = onTerminated,
+                onClipboard = onClipboard,
             )
             protocolSession = session
             videoSocket = null
@@ -219,30 +223,29 @@ class ScrcpyProtocolRepository(
         serverVersion: String,
         scid: Int,
         remoteServerPath: String,
-    ): List<String> = listOf(
-        adb.toString(),
-        "-s",
-        serial,
-        "shell",
-        "CLASSPATH=$remoteServerPath",
-        "app_process",
-        "/",
-        "com.genymobile.scrcpy.Server",
-        serverVersion,
-        "scid=${scid.toString(16).padStart(8, '0')}",
-        "tunnel_forward=false",
-        "video=true",
-        "audio=false",
-        "control=true",
-        "send_dummy_byte=false",
-        "send_device_meta=true",
-        "send_stream_meta=true",
-        "send_frame_meta=true",
-        "cleanup=true",
-        "video_codec=h264",
-        "max_size=1920",
-        "max_fps=30",
-    )
+        options: ScrcpyMirrorOptions,
+    ): List<String> = buildList {
+        add(adb.toString())
+        add("-s")
+        add(serial)
+        add("shell")
+        add("CLASSPATH=$remoteServerPath")
+        add("app_process")
+        add("/")
+        add("com.genymobile.scrcpy.Server")
+        add(serverVersion)
+        add("scid=${scid.toString(16).padStart(8, '0')}")
+        add("tunnel_forward=false")
+        add("video=true")
+        add("audio=false")
+        add("control=true")
+        add("send_dummy_byte=false")
+        add("send_device_meta=true")
+        add("send_stream_meta=true")
+        add("send_frame_meta=true")
+        add("cleanup=true")
+        addAll(options.toServerArgs())
+    }
 
     private suspend fun acceptWithRetry(
         listener: ServerSocket,

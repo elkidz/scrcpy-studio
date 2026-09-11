@@ -8,10 +8,13 @@ import com.danielribeiro.scrcpystudio.session.MirrorMode
 import com.danielribeiro.scrcpystudio.session.MirrorSessionState
 import com.danielribeiro.scrcpystudio.session.MirrorStatus
 import com.danielribeiro.scrcpystudio.session.RecordingStatus
-import com.danielribeiro.scrcpystudio.session.ScreenshotStatus
+import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsConfigurable
 import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsState
 import com.intellij.ide.BrowserUtil
+import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.options.ShowSettingsUtil
+import com.intellij.openapi.project.Project
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
@@ -20,12 +23,12 @@ import java.awt.FlowLayout
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import javax.swing.JButton
 import javax.swing.JFileChooser
 import javax.swing.JPanel
 import javax.swing.filechooser.FileNameExtensionFilter
 
 class MirrorSessionPanel(
+    private val project: Project,
     private val viewModel: DeviceMirrorViewModel,
     initialDevice: AndroidDevice,
 ) : JPanel(BorderLayout()), Disposable {
@@ -34,43 +37,126 @@ class MirrorSessionPanel(
     val serial: String
         get() = device.serial
 
-    private val deviceNameLabel = JBLabel()
-    private val serialLabel = JBLabel()
-    private val statusLabel = JBLabel()
-    private val modeMessageLabel = JBLabel()
     private val errorLabel = JBLabel()
-    private val outputLabel = JBLabel()
-    private val screenshotLabel = JBLabel()
-    private val startStopButton = JButton()
-    private val recordButton = JButton()
-    private val rotateButton = actionButton("Rotate", "Rotate the device display") {
+    private var currentState = MirrorSessionState(device, MirrorStatus.STOPPED)
+    private val powerButton = createScrcpyIconButton(
+        icon = ScrcpyIcons.DevicePower,
+        tooltip = "Power",
+    ) {
+        viewModel.sendPower(device.serial)
+    }
+    private val volumeDownButton = createScrcpyIconButton(
+        icon = ScrcpyIcons.DeviceVolumeDown,
+        tooltip = "Volume down",
+    ) {
+        viewModel.sendVolumeDown(device.serial)
+    }
+    private val volumeUpButton = createScrcpyIconButton(
+        icon = ScrcpyIcons.DeviceVolumeUp,
+        tooltip = "Volume up",
+    ) {
+        viewModel.sendVolumeUp(device.serial)
+    }
+    private val startStopButton = createScrcpyIconButton(
+        icon = AllIcons.Actions.Execute,
+        tooltip = "Start mirroring",
+    ) {
+        when (currentState.mirrorStatus) {
+            MirrorStatus.RUNNING,
+            MirrorStatus.STARTING,
+            -> viewModel.stopMirror(device.serial)
+
+            MirrorStatus.STOPPING -> Unit
+            MirrorStatus.STOPPED,
+            MirrorStatus.FAILED,
+            -> viewModel.startMirror(device.serial)
+        }
+    }
+    private val recordButton = createScrcpyIconButton(
+        icon = ScrcpyIcons.DeviceRecord,
+        tooltip = "Start recording",
+    ) {
+        when (currentState.recording.status) {
+            RecordingStatus.STARTING,
+            RecordingStatus.RECORDING,
+            -> viewModel.stopRecording(device.serial)
+
+            RecordingStatus.STOPPING -> Unit
+            RecordingStatus.IDLE,
+            RecordingStatus.COMPLETED,
+            RecordingStatus.FAILED,
+            -> chooseRecordingFile()
+        }
+    }
+    private val rotateButton = createScrcpyIconButton(
+        icon = ScrcpyIcons.DeviceRotate,
+        tooltip = "Rotate the device display",
+    ) {
         viewModel.rotate(device.serial)
     }
-    private val screenshotButton = actionButton("Screenshot", "Save a PNG screenshot") {
+    private val screenshotButton = createScrcpyIconButton(
+        icon = ScrcpyIcons.DeviceScreenshot,
+        tooltip = "Save a PNG screenshot",
+    ) {
         chooseScreenshotFile()
     }
-    private val backButton = actionButton("Back", "Navigate back on the device") {
+    private val backButton = createScrcpyIconButton(
+        icon = ScrcpyIcons.DeviceBack,
+        tooltip = "Navigate back on the device",
+    ) {
         viewModel.sendBack(device.serial)
     }
-    private val homeButton = actionButton("Home", "Navigate to the device home screen") {
+    private val homeButton = createScrcpyIconButton(
+        icon = ScrcpyIcons.DeviceHome,
+        tooltip = "Navigate to the device home screen",
+    ) {
         viewModel.sendHome(device.serial)
     }
-    private val recentsButton = actionButton("Recents", "Open recent apps on the device") {
+    private val recentsButton = createScrcpyIconButton(
+        icon = ScrcpyIcons.DeviceRecents,
+        tooltip = "Open recent apps on the device",
+    ) {
         viewModel.sendRecents(device.serial)
     }
-    private val modeButton = actionButton("External", "Switch mirror view") {
+    private val modeButton = createScrcpyIconButton(
+        icon = AllIcons.Actions.SwapPanels,
+        tooltip = "Switch mirror view",
+    ) {
         viewModel.toggleMirrorMode(device.serial)
     }
-    private val openOutputButton = JButton("Open recording")
-    private val openScreenshotButton = JButton("Open screenshot")
+    private val optionsButton = createScrcpyIconButton(
+        icon = ScrcpyIcons.ScrcpyOptions,
+        tooltip = "Scrcpy options",
+    ) {
+        showScrcpyOptions()
+    }
+    private val settingsButton = createScrcpyIconButton(
+        icon = AllIcons.General.GearPlain,
+        tooltip = "Open Scrcpy Studio settings",
+    ) {
+        ShowSettingsUtil.getInstance()
+            .showSettingsDialog(project, ScrcpySettingsConfigurable::class.java)
+    }
+    private val openOutputButton = createScrcpyIconButton(
+        icon = AllIcons.Actions.ShowViewer,
+        tooltip = "Open recording",
+    ) {
+        currentState.recording.outputFile?.let { BrowserUtil.browse(it.toUri()) }
+    }
+    private val openScreenshotButton = createScrcpyIconButton(
+        icon = AllIcons.Actions.ShowViewer,
+        tooltip = "Open screenshot",
+    ) {
+        currentState.screenshot.outputFile?.let { BrowserUtil.browse(it.toUri()) }
+    }
     private val mirrorHost = EmbeddedMirrorHost(viewModel, device)
-    private var currentState = MirrorSessionState(device, MirrorStatus.STOPPED)
+    private val footer = createFooter()
 
     init {
         border = JBUI.Borders.empty(4)
-        add(createHeader(), BorderLayout.NORTH)
+        add(createToolbar(), BorderLayout.NORTH)
         add(mirrorHost, BorderLayout.CENTER)
-        add(createFooter(), BorderLayout.SOUTH)
+        add(footer, BorderLayout.SOUTH)
         updateDevice(device)
         update(currentState)
     }
@@ -80,32 +166,41 @@ class MirrorSessionPanel(
             "A device tab cannot change its serial number."
         }
         device = updatedDevice
-        deviceNameLabel.text = updatedDevice.displayName
-        serialLabel.text = updatedDevice.serial
     }
 
     fun update(state: MirrorSessionState) {
         currentState = state
-        statusLabel.text = statusText(state)
-        modeMessageLabel.text = state.modeMessage.orEmpty()
-        modeMessageLabel.isVisible = state.modeMessage != null
         errorLabel.text = state.errorMessage.orEmpty()
         errorLabel.isVisible = state.errorMessage != null
 
-        startStopButton.text = when (state.mirrorStatus) {
+        val startStopTooltip = when (state.mirrorStatus) {
             MirrorStatus.STARTING,
             MirrorStatus.RUNNING,
             -> "Stop mirroring"
 
-            MirrorStatus.STOPPING -> "Stopping..."
+            MirrorStatus.STOPPING -> "Stopping mirroring..."
             MirrorStatus.STOPPED,
             MirrorStatus.FAILED,
             -> "Start mirroring"
         }
+        updateScrcpyIconButton(
+            button = startStopButton,
+            icon = when (state.mirrorStatus) {
+                MirrorStatus.STARTING,
+                MirrorStatus.RUNNING,
+                -> AllIcons.Actions.Close
+
+                MirrorStatus.STOPPING -> AllIcons.Actions.Suspend
+                MirrorStatus.STOPPED,
+                MirrorStatus.FAILED,
+                -> AllIcons.Actions.Execute
+            },
+            tooltip = startStopTooltip,
+        )
         startStopButton.isEnabled = state.mirrorStatus != MirrorStatus.STOPPING &&
             state.device.canMirror
 
-        recordButton.text = when (state.recording.status) {
+        val recordTooltip = when (state.recording.status) {
             RecordingStatus.STARTING,
             RecordingStatus.RECORDING,
             -> "Stop recording"
@@ -116,11 +211,30 @@ class MirrorSessionPanel(
             RecordingStatus.FAILED,
             -> "Start recording"
         }
+        updateScrcpyIconButton(
+            button = recordButton,
+            icon = when (state.recording.status) {
+                RecordingStatus.STARTING,
+                RecordingStatus.RECORDING,
+                -> AllIcons.Actions.Close
+
+                RecordingStatus.STOPPING -> AllIcons.Actions.Suspend
+                RecordingStatus.IDLE,
+                RecordingStatus.COMPLETED,
+                RecordingStatus.FAILED,
+                -> ScrcpyIcons.DeviceRecord
+            },
+            tooltip = recordTooltip,
+        )
         recordButton.isEnabled = state.mirrorStatus == MirrorStatus.RUNNING &&
             state.recording.status != RecordingStatus.STOPPING
 
         val isRunning = state.mirrorStatus == MirrorStatus.RUNNING
         val canControl = state.device.canMirror && isRunning
+        val canUseHardwareKeys = state.device.canMirror
+        powerButton.isEnabled = canUseHardwareKeys
+        volumeDownButton.isEnabled = canUseHardwareKeys
+        volumeUpButton.isEnabled = canUseHardwareKeys
         rotateButton.isEnabled = canControl
         backButton.isEnabled = canControl
         homeButton.isEnabled = canControl
@@ -128,35 +242,26 @@ class MirrorSessionPanel(
         screenshotButton.isEnabled = state.device.canMirror
         modeButton.isEnabled = state.device.canMirror &&
             state.mirrorStatus !in setOf(MirrorStatus.STARTING, MirrorStatus.STOPPING)
-        modeButton.text = if (state.mirrorMode == MirrorMode.EMBEDDED) {
-            "External"
-        } else {
-            "Embedded"
-        }
-        modeButton.toolTipText = if (state.mirrorMode == MirrorMode.EMBEDDED) {
+        val modeTooltip = if (state.mirrorMode == MirrorMode.EMBEDDED) {
             "Switch to the external scrcpy window"
         } else {
             "Switch to the embedded scrcpy view"
         }
+        updateScrcpyIconButton(
+            button = modeButton,
+            icon = AllIcons.Actions.SwapPanels,
+            tooltip = modeTooltip,
+        )
 
-        outputLabel.text = state.recording.outputFile?.toString().orEmpty()
         openOutputButton.isVisible = state.recording.outputFile?.let {
             Files.isRegularFile(it)
         } == true
-        screenshotLabel.text = when (state.screenshot.status) {
-            ScreenshotStatus.SAVING -> "Saving screenshot..."
-            ScreenshotStatus.COMPLETED -> state.screenshot.outputFile?.toString().orEmpty()
-            ScreenshotStatus.FAILED -> state.screenshot.errorMessage.orEmpty()
-            ScreenshotStatus.IDLE -> ""
-        }
-        screenshotLabel.foreground = if (state.screenshot.status == ScreenshotStatus.FAILED) {
-            JBColor.RED
-        } else {
-            JBColor.GRAY
-        }
         openScreenshotButton.isVisible = state.screenshot.outputFile?.let {
             Files.isRegularFile(it)
         } == true
+        footer.isVisible = errorLabel.isVisible ||
+            openOutputButton.isVisible ||
+            openScreenshotButton.isVisible
 
         mirrorHost.update(state)
         revalidate()
@@ -167,85 +272,51 @@ class MirrorSessionPanel(
         mirrorHost.dispose()
     }
 
-    private fun createHeader(): JPanel =
-        JPanel(BorderLayout()).apply {
+    private fun createToolbar(): JPanel =
+        JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
             border = JBUI.Borders.emptyBottom(4)
-            add(
-                JPanel(FlowLayout(FlowLayout.LEFT, 8, 2)).apply {
-                    add(deviceNameLabel)
-                    add(serialLabel)
-                    add(statusLabel)
-                    add(modeMessageLabel)
-                },
-                BorderLayout.NORTH,
-            )
-            add(
-                JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
-                    add(rotateButton)
-                    add(screenshotButton)
-                    add(backButton)
-                    add(homeButton)
-                    add(recentsButton)
-                    add(modeButton)
-                    startStopButton.addActionListener {
-                        when (currentState.mirrorStatus) {
-                            MirrorStatus.RUNNING,
-                            MirrorStatus.STARTING,
-                            -> viewModel.stopMirror(device.serial)
-
-                            MirrorStatus.STOPPING -> Unit
-                            MirrorStatus.STOPPED,
-                            MirrorStatus.FAILED,
-                            -> viewModel.startMirror(device.serial)
-                        }
-                    }
-                    add(startStopButton)
-
-                    recordButton.addActionListener {
-                        when (currentState.recording.status) {
-                            RecordingStatus.STARTING,
-                            RecordingStatus.RECORDING,
-                            -> viewModel.stopRecording(device.serial)
-
-                            RecordingStatus.STOPPING -> Unit
-                            RecordingStatus.IDLE,
-                            RecordingStatus.COMPLETED,
-                            RecordingStatus.FAILED,
-                            -> chooseRecordingFile()
-                        }
-                    }
-                    add(recordButton)
-                },
-                BorderLayout.CENTER,
-            )
+            add(powerButton.component)
+            add(volumeDownButton.component)
+            add(volumeUpButton.component)
+            add(createScrcpyToolbarSeparator())
+            add(rotateButton.component)
+            add(createScrcpyToolbarSeparator())
+            add(backButton.component)
+            add(homeButton.component)
+            add(recentsButton.component)
+            add(createScrcpyToolbarSeparator())
+            add(screenshotButton.component)
+            add(recordButton.component)
+            add(createScrcpyToolbarSeparator())
+            add(modeButton.component)
+            add(startStopButton.component)
+            add(optionsButton.component)
+            add(settingsButton.component)
         }
 
     private fun createFooter(): JPanel =
         JPanel(BorderLayout()).apply {
             border = JBUI.Borders.emptyTop(4)
+            isVisible = false
             add(
                 JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
                     errorLabel.foreground = JBColor.RED
                     add(errorLabel)
-                    add(outputLabel)
-                    add(screenshotLabel)
                 },
                 BorderLayout.CENTER,
             )
             add(
-                JPanel(FlowLayout(FlowLayout.RIGHT, 4, 2)).apply {
-                    openOutputButton.addActionListener {
-                        currentState.recording.outputFile?.let { BrowserUtil.browse(it.toUri()) }
-                    }
-                    add(openOutputButton)
-                    openScreenshotButton.addActionListener {
-                        currentState.screenshot.outputFile?.let { BrowserUtil.browse(it.toUri()) }
-                    }
-                    add(openScreenshotButton)
+                JPanel(FlowLayout(FlowLayout.RIGHT, 0, 0)).apply {
+                    add(openOutputButton.component)
+                    add(openScreenshotButton.component)
                 },
                 BorderLayout.EAST,
             )
         }
+
+    private fun showScrcpyOptions() {
+        ScrcpyOptionsPopup.show(optionsButton.component, viewModel)
+    }
 
     private fun chooseRecordingFile() {
         val configuredDirectory = ScrcpySettingsState.getInstance()
@@ -280,7 +351,7 @@ class MirrorSessionPanel(
             "Scrcpy Studio",
         )
         val currentDirectory = directory
-            .takeIf(Files::isDirectory)
+            .takeIf { Files.isDirectory(it) }
             ?: Paths.get(System.getProperty("user.home"))
         val suggestedFile = ScreenshotFileNamer.nextFile(directory, device)
 
@@ -307,34 +378,5 @@ class MirrorSessionPanel(
             file
         } else {
             file.resolveSibling("${file.fileName}.png")
-        }
-
-    private fun actionButton(
-        text: String,
-        tooltip: String,
-        action: () -> Unit,
-    ): JButton = JButton(text).apply {
-        toolTipText = tooltip
-        accessibleContext.accessibleName = tooltip
-        addActionListener { action() }
-    }
-
-    private fun statusText(state: MirrorSessionState): String =
-        when (state.mirrorStatus) {
-            MirrorStatus.STARTING -> "Starting"
-            MirrorStatus.RUNNING -> when (state.recording.status) {
-                RecordingStatus.STARTING -> "Preparing recording"
-                RecordingStatus.RECORDING -> "Recording"
-                RecordingStatus.STOPPING -> "Finishing recording"
-                else -> if (state.mirrorMode == MirrorMode.EXTERNAL) {
-                    "External window"
-                } else {
-                    "Mirroring"
-                }
-            }
-
-            MirrorStatus.STOPPING -> "Stopping"
-            MirrorStatus.STOPPED -> "Stopped"
-            MirrorStatus.FAILED -> "Failed"
         }
 }

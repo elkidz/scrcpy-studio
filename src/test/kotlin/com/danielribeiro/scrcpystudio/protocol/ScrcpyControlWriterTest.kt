@@ -11,20 +11,44 @@ import java.nio.ByteOrder
 class ScrcpyControlWriterTest {
 
     @Test
-    fun serializesHomeKeycodeUsingScrcpyWireLayout() {
+    fun serializesHomeKeyPressUsingScrcpyWireLayout() {
         val bytes = ByteArrayOutputStream()
 
-        ScrcpyControlWriter(bytes).home()
+        ScrcpyControlWriter(bytes).pressHome()
 
         val data = bytes.toByteArray()
-        val buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN)
-        assertEquals(14, data.size)
-        assertEquals(ScrcpyControlWriter.TYPE_INJECT_KEYCODE, buffer.get().toInt())
-        assertEquals(ScrcpyControlWriter.KEY_ACTION_DOWN, buffer.get().toInt())
-        assertEquals(ScrcpyControlWriter.KEYCODE_HOME, buffer.int)
-        assertEquals(0, buffer.int)
-        assertEquals(0, buffer.int)
-        assertTrue(buffer.remaining() == 0)
+        assertEquals(28, data.size)
+
+        val down = ByteBuffer.wrap(data, 0, 14).order(ByteOrder.BIG_ENDIAN)
+        assertEquals(ScrcpyControlWriter.TYPE_INJECT_KEYCODE, down.get().toInt())
+        assertEquals(ScrcpyControlWriter.KEY_ACTION_DOWN, down.get().toInt())
+        assertEquals(ScrcpyControlWriter.KEYCODE_HOME, down.int)
+        assertEquals(0, down.int)
+        assertEquals(0, down.int)
+
+        val up = ByteBuffer.wrap(data, 14, 14).order(ByteOrder.BIG_ENDIAN)
+        assertEquals(ScrcpyControlWriter.TYPE_INJECT_KEYCODE, up.get().toInt())
+        assertEquals(ScrcpyControlWriter.KEY_ACTION_UP, up.get().toInt())
+        assertEquals(ScrcpyControlWriter.KEYCODE_HOME, up.int)
+        assertEquals(0, up.int)
+        assertEquals(0, up.int)
+    }
+
+    @Test
+    fun serializesBackKeyPressUsingScrcpyWireLayout() {
+        val bytes = ByteArrayOutputStream()
+
+        ScrcpyControlWriter(bytes).pressBack()
+
+        assertArrayEquals(
+            byteArrayOf(
+                ScrcpyControlWriter.TYPE_BACK_OR_SCREEN_ON.toByte(),
+                ScrcpyControlWriter.KEY_ACTION_DOWN.toByte(),
+                ScrcpyControlWriter.TYPE_BACK_OR_SCREEN_ON.toByte(),
+                ScrcpyControlWriter.KEY_ACTION_UP.toByte(),
+            ),
+            bytes.toByteArray(),
+        )
     }
 
     @Test
@@ -69,5 +93,31 @@ class ScrcpyControlWriterTest {
         assertEquals(1, buffer.int)
         assertEquals(1, buffer.int)
         assertTrue(buffer.remaining() == 0)
+    }
+
+    @Test
+    fun serializesClipboardPasteUsingScrcpyWireLayout() {
+        val bytes = ByteArrayOutputStream()
+        ScrcpyControlWriter(bytes).setClipboard("hi", paste = true)
+
+        val data = bytes.toByteArray()
+        val buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN)
+        assertEquals(ScrcpyControlWriter.TYPE_SET_CLIPBOARD, buffer.get().toInt())
+        assertEquals(0L, buffer.long)
+        assertEquals(1, buffer.get().toInt())
+        assertEquals(2, buffer.int)
+        assertEquals("hi", String(data, buffer.position(), 2, Charsets.UTF_8))
+    }
+
+    @Test
+    fun serializesInjectTextUsingScrcpyWireLayout() {
+        val bytes = ByteArrayOutputStream()
+        ScrcpyControlWriter(bytes).injectText("ok")
+
+        val data = bytes.toByteArray()
+        val buffer = ByteBuffer.wrap(data).order(ByteOrder.BIG_ENDIAN)
+        assertEquals(ScrcpyControlWriter.TYPE_INJECT_TEXT, buffer.get().toInt())
+        assertEquals(2, buffer.int)
+        assertEquals("ok", String(data, buffer.position(), 2, Charsets.UTF_8))
     }
 }

@@ -1,9 +1,12 @@
 package com.danielribeiro.scrcpystudio.data
 
+import com.danielribeiro.scrcpystudio.settings.ScrcpyMirrorOptions
+import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsState
 import java.nio.file.Path
 
 class ScrcpyCommandBuilder(
     private val scrcpyExecutable: Path,
+    private val options: ScrcpyMirrorOptions = ScrcpyMirrorOptions.from(ScrcpySettingsState.State()),
 ) {
 
     fun mirror(device: AndroidDevice): List<String> = buildList {
@@ -12,7 +15,7 @@ class ScrcpyCommandBuilder(
         add(device.serial)
         add("--window-title")
         add(windowTitle(device))
-        add("--window-borderless")
+        addAll(options.toClientArgs())
     }
 
     fun record(device: AndroidDevice, outputFile: Path): List<String> = buildList {

@@ -3,6 +3,7 @@ package com.danielribeiro.scrcpystudio.data
 import com.danielribeiro.scrcpystudio.process.ManagedProcess
 import com.danielribeiro.scrcpystudio.process.ProcessRunner
 import com.danielribeiro.scrcpystudio.settings.ExecutableResolver
+import com.danielribeiro.scrcpystudio.settings.ScrcpyMirrorOptions
 import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsState
 import java.nio.file.Path
 
@@ -18,8 +19,12 @@ class ScrcpyRepository(
         onOutput: (String) -> Unit = {},
         onTerminated: (exitCode: Int, output: String) -> Unit = { _, _ -> },
     ): ManagedProcess {
-        val tools = executableResolver.resolve(settings.getState())
-        val command = ScrcpyCommandBuilder(tools.scrcpy).mirror(device)
+        val state = settings.getState()
+        val tools = executableResolver.resolve(state)
+        val command = ScrcpyCommandBuilder(
+            scrcpyExecutable = tools.scrcpy,
+            options = ScrcpyMirrorOptions.from(state),
+        ).mirror(device)
         return start(
             command = command,
             toolsScrcpy = tools.scrcpy,
