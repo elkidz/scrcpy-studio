@@ -64,7 +64,7 @@ class ScrcpyControlWriter(
         }
     }
 
-    fun back(action: Int = KEY_ACTION_DOWN) {
+    fun back(action: Int) {
         synchronized(lock) {
             output.writeByte(TYPE_BACK_OR_SCREEN_ON)
             output.writeByte(action)
@@ -72,18 +72,22 @@ class ScrcpyControlWriter(
         }
     }
 
-    fun home(action: Int = KEY_ACTION_DOWN) {
-        injectKeycode(
-            action = action,
-            keycode = KEYCODE_HOME,
-        )
+    fun pressBack() {
+        back(KEY_ACTION_DOWN)
+        back(KEY_ACTION_UP)
     }
 
-    fun recents(action: Int = KEY_ACTION_DOWN) {
-        injectKeycode(
-            action = action,
-            keycode = KEYCODE_APP_SWITCH,
-        )
+    fun pressHome() {
+        pressKeycode(KEYCODE_HOME)
+    }
+
+    fun pressRecents() {
+        pressKeycode(KEYCODE_APP_SWITCH)
+    }
+
+    fun pressKeycode(keycode: Int) {
+        injectKeycode(KEY_ACTION_DOWN, keycode)
+        injectKeycode(KEY_ACTION_UP, keycode)
     }
 
     fun rotateDevice() {
@@ -93,18 +97,63 @@ class ScrcpyControlWriter(
         }
     }
 
+    fun injectText(text: String) {
+        val payload = text.toByteArray(Charsets.UTF_8)
+        require(payload.size <= MAX_INJECT_TEXT_LENGTH) {
+            "Injected text cannot exceed $MAX_INJECT_TEXT_LENGTH bytes."
+        }
+        synchronized(lock) {
+            output.writeByte(TYPE_INJECT_TEXT)
+            output.writeInt(payload.size)
+            output.write(payload)
+            output.flush()
+        }
+    }
+
+    fun setClipboard(text: String, paste: Boolean) {
+        val payload = text.toByteArray(Charsets.UTF_8)
+        synchronized(lock) {
+            output.writeByte(TYPE_SET_CLIPBOARD)
+            output.writeLong(0)
+            output.writeBoolean(paste)
+            output.writeInt(payload.size)
+            output.write(payload)
+            output.flush()
+        }
+    }
+
+    fun getClipboard(copyKey: Int = COPY_KEY_COPY) {
+        require(copyKey in 0..2) { "Clipboard copy key must be 0, 1, or 2." }
+        synchronized(lock) {
+            output.writeByte(TYPE_GET_CLIPBOARD)
+            output.writeByte(copyKey)
+            output.flush()
+        }
+    }
+
     companion object {
         const val TYPE_INJECT_KEYCODE = 0
+        const val TYPE_INJECT_TEXT = 1
         const val POINTER_ID_MOUSE = -1L
         const val TYPE_INJECT_TOUCH_EVENT = 2
         const val TYPE_BACK_OR_SCREEN_ON = 4
+        const val TYPE_GET_CLIPBOARD = 8
+        const val TYPE_SET_CLIPBOARD = 9
         const val TYPE_ROTATE_DEVICE = 11
         const val KEY_ACTION_DOWN = 0
         const val KEY_ACTION_UP = 1
         const val KEYCODE_HOME = 3
         const val KEYCODE_BACK = 4
+        const val KEYCODE_VOLUME_UP = 24
+        const val KEYCODE_VOLUME_DOWN = 25
+        const val KEYCODE_POWER = 26
         const val KEYCODE_APP_SWITCH = 187
+        const val COPY_KEY_NONE = 0
+        const val COPY_KEY_COPY = 1
+        const val COPY_KEY_CUT = 2
+        const val DEVICE_MSG_CLIPBOARD = 0
 
         private const val MAX_U16 = 65_535
+        private const val MAX_INJECT_TEXT_LENGTH = 300
     }
 }
