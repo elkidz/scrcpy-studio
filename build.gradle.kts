@@ -1,3 +1,4 @@
+import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
 plugins {
@@ -10,8 +11,7 @@ version = providers.gradleProperty("pluginVersion").get()
 
 dependencies {
     intellijPlatform {
-        androidStudio(providers.gradleProperty("androidStudioVersion").get())
-        bundledPlugin("org.jetbrains.android")
+        intellijIdeaCommunity(providers.gradleProperty("ideTargetVersion").get())
         testFramework(TestFrameworkType.Platform)
     }
 
@@ -31,7 +31,7 @@ intellijPlatform {
         name = "Scrcpy Studio"
         version = providers.gradleProperty("pluginVersion")
         description = """
-            Mirror and control Android devices in Android Studio with scrcpy.
+            Mirror and control Android devices in Android Studio or IntelliJ IDEA with scrcpy.
             Includes device tabs, device controls, an embedded protocol client
             with an external-window fallback, screenshots, and MP4 recording.
         """.trimIndent()
@@ -40,12 +40,15 @@ intellijPlatform {
         }
         ideaVersion {
             sinceBuild = providers.gradleProperty("pluginSinceBuild")
-            untilBuild = providers.gradleProperty("pluginUntilBuild")
         }
     }
 
     pluginVerification {
         ides {
+            create(IntelliJPlatformType.IntellijIdeaCommunity, "2025.1")
+            create(IntelliJPlatformType.IntellijIdeaUltimate, "2025.1")
+            create(IntelliJPlatformType.AndroidStudio, providers.gradleProperty("androidStudioVersion").get())
+            create(IntelliJPlatformType.AndroidStudio, "2026.1.2.1")
             recommended()
         }
     }

@@ -1,13 +1,13 @@
 # Scrcpy Studio
 
-Scrcpy Studio is an Android Studio plugin for mirroring and controlling
+Scrcpy Studio is an IntelliJ Platform plugin for mirroring and controlling
 [`scrcpy`](https://github.com/Genymobile/scrcpy) devices in a tool window. It
 provides Running Devices-style tabs, device controls, and an external-window
 fallback when the embedded protocol client cannot start.
 
 ## Requirements
 
-- Android Studio Quail 2 (`2026.1.2`) or a compatible `261.*` build.
+- IntelliJ IDEA 2025.1+ (`251+`) or Android Studio 2025.1+ (`251+`).
 - Java 17 for plugin development.
 - `scrcpy` and `adb` installed locally.
 - USB debugging or wireless debugging enabled on the Android device.

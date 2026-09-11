@@ -1,7 +1,7 @@
 # Manual test checklist
 
-Run these checks with a physical Android device or emulator and the target
-Android Studio build.
+Run these checks with a physical Android device or emulator on a supported
+IntelliJ IDEA or Android Studio build (`251+`).
 
 ## Tool discovery
 
