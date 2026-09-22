@@ -26,6 +26,7 @@ internal object ScrcpyOptionsPopup {
         val current = ScrcpyMirrorOptions.from(original)
 
         lateinit var autoMirror: JCheckBox
+        lateinit var autoOpenToolWindow: JCheckBox
         lateinit var autoReconnect: JCheckBox
         lateinit var alwaysOnTop: JCheckBox
         lateinit var showTouches: JCheckBox
@@ -86,6 +87,11 @@ internal object ScrcpyOptionsPopup {
                     ).component
                 }
                 row {
+                    autoOpenToolWindow = checkBox(
+                        "Automatically open Scrcpy Studio when a device connects",
+                    ).component
+                }
+                row {
                     autoReconnect = checkBox(
                         "Reconnect and resume mirroring when a device returns",
                     ).component
@@ -119,6 +125,7 @@ internal object ScrcpyOptionsPopup {
                 button("Apply") {
                     settings.getState().apply {
                         autoMirrorOnDeviceConnect = autoMirror.isSelected
+                        autoOpenToolWindowOnDeviceConnect = autoOpenToolWindow.isSelected
                         this.autoReconnect = autoReconnect.isSelected
                         writeMirrorOptions(selectedOptions())
                     }
@@ -131,6 +138,7 @@ internal object ScrcpyOptionsPopup {
         }
 
         autoMirror.isSelected = original.autoMirrorOnDeviceConnect
+        autoOpenToolWindow.isSelected = original.autoOpenToolWindowOnDeviceConnect
         autoReconnect.isSelected = original.autoReconnect
         alwaysOnTop.isSelected = current.alwaysOnTopWhenExternal
         showTouches.isSelected = current.showTouches

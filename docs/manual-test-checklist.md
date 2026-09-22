@@ -18,12 +18,19 @@ IntelliJ IDEA or Android Studio build (`251+`).
 - [ ] Confirm each connected device gets a tab before mirroring starts.
 - [ ] Show unauthorized, offline, and no-permissions states without enabling mirror
       controls.
-- [ ] Start and stop one mirror session.
+- [ ] Use the tab-strip `+` to start mirroring a connected device and confirm
+      the device appears as a tab.
+- [ ] Click a mirrored device tab's `x` and confirm it stops mirroring and
+      removes the tab.
 - [ ] Start sessions for two different device tabs.
 - [ ] Disconnect a mirrored device and reconnect it; confirm bounded automatic
       reconnect restores the mirror when enabled.
 - [ ] Disable auto-mirror and auto-reconnect independently and verify each setting
       takes effect.
+- [ ] Enable auto-open Scrcpy Studio and connect a new device; confirm the tool
+      window opens without reopening for devices already connected at project start.
+- [ ] Confirm the Scrcpy Studio tool-window icon gets a green bottom-right dot
+      while at least one device is actively mirrored, and loses it after stopping.
 - [ ] Close the tool window and confirm the child scrcpy processes are cleaned up.
 - [ ] Close an external scrcpy window and confirm the session state updates.
 
@@ -49,19 +56,28 @@ IntelliJ IDEA or Android Studio build (`251+`).
 
 - [ ] Use Rotate and confirm the embedded device orientation changes.
 - [ ] Use Back, Home, and Recents and confirm each Android navigation action.
-- [ ] Use Screenshot, save a PNG, and open the resulting file.
+- [ ] Use Screenshot and verify the preview popup shows dimensions, format, size,
+      Recapture, Copy to Clipboard, resolution, output directory, Save, Cancel,
+      Configure, and Help.
+- [ ] Recapture, copy the preview to the clipboard, save at native and reduced
+      resolution, and open the resulting PNG.
+- [ ] Cancel the screenshot popup and confirm no temporary preview file remains.
 - [ ] Toggle from embedded mode to the external scrcpy window and back.
 - [ ] Confirm the external scrcpy window uses a normal framed window (not borderless).
 - [ ] Confirm navigation and screenshot actions work while external mode is active.
-- [ ] Confirm the existing Start recording button remains available without
-      changing its current behavior.
+- [ ] Confirm power, volume, rotate, Back, Home, and Recents are disabled while
+      mirroring is stopped and enabled while it is running.
+- [ ] Use the top-right window icon to float Scrcpy Studio and dock it again.
+- [ ] Confirm an External scrcpy window badge/message is visible in external mode.
 
 ## Recording follow-up
 
 - [ ] Validate the selected output path and generated MP4 filename.
+- [ ] Open the Screen Recorder Options dialog and verify bitrate, resolution,
+      Show taps, output directory, Configure, Start Recording, Cancel, and Help.
+- [ ] Start recording and verify the non-modal Record Screen status dialog shows
+      elapsed time and a Stop Recording button.
 - [ ] Start and stop recording from an active mirror.
 - [ ] Open the resulting MP4 and seek through it.
+- [ ] Confirm stopping a recording waits for scrcpy to finalize the MP4.
 - [ ] Stop the IDE while recording and confirm the output behavior is documented.
-
-Recording checks are intentionally deferred from the current implementation
-pass.

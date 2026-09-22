@@ -34,33 +34,42 @@ gradlew.bat buildPlugin
 gradlew.bat verifyPlugin
 ```
 
-Inside the development IDE, open **Tools | Scrcpy Studio**, select a connected
-device tab, and use the compact icon toolbar to start mirroring, rotate the
+Inside the development IDE, open **Tools | Scrcpy Studio**, use the tab-strip
+`+` to add a connected device, and use the compact icon toolbar to rotate the
 display, capture screenshots, send Android navigation keys, record, and switch
-between the embedded view and a normal external scrcpy window. Each connected
-device receives its own tab. The plugin starts a matching `scrcpy-server` over
+between the embedded view and a normal external scrcpy window. Each actively
+mirrored device receives its own closable tab; closing it stops mirroring. The
+plugin starts a matching `scrcpy-server` over
 an ADB reverse tunnel, decodes the H.264 stream in-process, and paints it in
 the tab. Mouse touch events and navigation controls are sent back through
 scrcpy's control socket when the embedded mode is active. Screenshots use
 `adb exec-out screencap -p`.
 
 The Automation settings can start mirroring for every newly connected device
-and reconnect sessions when a device returns. The first device scan establishes
-a baseline, so already-connected devices are not started unexpectedly when a
-project opens. If the server, tunnel, or decoder cannot be started, the plugin
-falls back to a managed external scrcpy window with a standard window frame.
+and open Scrcpy Studio when a new device connects. The first device scan
+establishes a baseline, so already-connected devices do not unexpectedly open
+the window when a project starts. The tool-window icon shows a green badge while
+a device is actively mirrored. If the server, tunnel, or decoder cannot be
+started, the plugin falls back to a managed external scrcpy window with a
+visible external-mode status.
+
+Screenshots open in a preview dialog with recapture, clipboard copy, output
+directory configuration, and native-resolution scaling options. Scrcpy Studio
+can also be switched between a docked and floating tool window from its
+top-right window control.
 
 The protocol used by scrcpy is internal and version-coupled. The plugin reads
 the installed client version and starts the sibling server with that exact
 version. The current embedded client targets scrcpy 4.x and H.264 video; other
 versions or codecs use the external fallback.
 
-## Recording status
+## Recording
 
-The MP4 recording controls and command path are present, but recording stop and
-container finalization are intentionally not validated in this implementation
-pass. Do not treat recording as production-ready until that follow-up test is
-completed.
+Recording opens a screen recorder options dialog with bitrate, resolution,
+touch indicators, and the configured output directory. Recordings are limited
+to 30 minutes and are written as MP4 files. Stop recording sends scrcpy a
+graceful Ctrl+C/SIGINT request so the MP4 container can be finalized before the
+file is reported as complete.
 
 ## Architecture
 

@@ -16,7 +16,9 @@ class ScrcpySettingsState : PersistentStateComponent<ScrcpySettingsState.State> 
         var scrcpyPath: String = "",
         var adbPath: String = "",
         var recordingDirectory: String = defaultRecordingDirectory(),
+        var screenshotDirectory: String = defaultScreenshotDirectory(),
         var autoMirrorOnDeviceConnect: Boolean = true,
+        var autoOpenToolWindowOnDeviceConnect: Boolean = true,
         var autoReconnect: Boolean = true,
         var alwaysOnTopWhenExternal: Boolean = false,
         var maxSize: Int = 1920,
@@ -50,6 +52,12 @@ class ScrcpySettingsState : PersistentStateComponent<ScrcpySettingsState.State> 
             File(
                 System.getProperty("user.home"),
                 "Videos${File.separator}Scrcpy Studio",
+            ).path
+
+        private fun defaultScreenshotDirectory(): String =
+            File(
+                System.getProperty("user.home"),
+                "Pictures${File.separator}Scrcpy Studio",
             ).path
     }
 }

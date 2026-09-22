@@ -34,6 +34,9 @@ object ScrcpyIcons {
     @JvmField
     val ScrcpyOptions: Icon = load("/icons/scrcpyOptions.svg")
 
+    @JvmField
+    val ScrcpyStudio: Icon = load("/icons/scrcpyStudio.svg")
+
     private fun load(path: String): Icon =
         IconLoader.getIcon(path, ScrcpyIcons::class.java)
 }

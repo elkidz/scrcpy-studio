@@ -4,9 +4,13 @@ import com.danielribeiro.scrcpystudio.data.AndroidDevice
 import com.danielribeiro.scrcpystudio.process.ProcessRunner
 import com.danielribeiro.scrcpystudio.settings.ExecutableResolver
 import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsState
+import java.awt.RenderingHints
+import java.awt.image.BufferedImage
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
+import javax.imageio.ImageIO
+import kotlin.math.roundToInt
 
 class ScreenshotRepository(
     private val settings: ScrcpySettingsState,
@@ -50,6 +54,68 @@ class ScreenshotRepository(
         val temporary = Files.createTempFile(parent, ".scrcpy-screenshot-", ".tmp")
         try {
             Files.write(temporary, result.output)
+            try {
+                Files.move(
+                    temporary,
+                    target,
+                    StandardCopyOption.ATOMIC_MOVE,
+                )
+            } catch (_: java.nio.file.AtomicMoveNotSupportedException) {
+                Files.move(temporary, target)
+            }
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
+        return target
+    }
+
+    fun savePreview(
+        previewFile: Path,
+        outputFile: Path,
+        resolutionPercent: Int,
+    ): Path {
+        require(resolutionPercent in 1..100) {
+            "Screenshot resolution must be between 1% and 100%."
+        }
+        val source = previewFile.toAbsolutePath().normalize()
+        val target = outputFile.toAbsolutePath().normalize()
+        if (!Files.isRegularFile(source)) {
+            throw IllegalStateException("The screenshot preview is no longer available.")
+        }
+        if (Files.exists(target)) {
+            throw IllegalStateException("The screenshot file already exists.")
+        }
+        val parent = target.parent
+            ?: throw IllegalStateException("The screenshot path must have a parent directory.")
+        Files.createDirectories(parent)
+        val temporary = Files.createTempFile(parent, ".scrcpy-screenshot-save-", ".tmp")
+        try {
+            if (resolutionPercent == 100) {
+                Files.copy(source, temporary, StandardCopyOption.REPLACE_EXISTING)
+            } else {
+                val image = ImageIO.read(source.toFile())
+                    ?: throw IllegalStateException("The screenshot preview is not a valid PNG.")
+                val width = (image.width * resolutionPercent / 100f)
+                    .roundToInt()
+                    .coerceAtLeast(1)
+                val height = (image.height * resolutionPercent / 100f)
+                    .roundToInt()
+                    .coerceAtLeast(1)
+                val scaled = BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB)
+                val graphics = scaled.createGraphics()
+                try {
+                    graphics.setRenderingHint(
+                        RenderingHints.KEY_INTERPOLATION,
+                        RenderingHints.VALUE_INTERPOLATION_BILINEAR,
+                    )
+                    graphics.drawImage(image, 0, 0, width, height, null)
+                } finally {
+                    graphics.dispose()
+                }
+                if (!ImageIO.write(scaled, "png", temporary.toFile())) {
+                    throw IllegalStateException("PNG encoding is not available.")
+                }
+            }
             try {
                 Files.move(
                     temporary,
