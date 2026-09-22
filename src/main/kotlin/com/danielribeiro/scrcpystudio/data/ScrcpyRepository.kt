@@ -6,6 +6,7 @@ import com.danielribeiro.scrcpystudio.settings.ExecutableResolver
 import com.danielribeiro.scrcpystudio.settings.ScrcpyMirrorOptions
 import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsState
 import com.danielribeiro.scrcpystudio.recording.RecordingOptions
+import java.nio.file.Paths
 import java.nio.file.Path
 
 class ScrcpyRepository(
@@ -64,6 +65,34 @@ class ScrcpyRepository(
         )
     }
 
+    fun stopStaleExternalMirror(device: AndroidDevice) {
+        runCatching {
+            val scrcpyExecutable = executableResolver
+                .resolve(settings.getState())
+                .scrcpy
+                .fileName
+                .toString()
+            val expectedTitle = ScrcpyCommandBuilder.windowTitleFor(device.serial)
+            ProcessHandle.allProcesses().forEach { process ->
+                val info = process.info()
+                val command = info.command().orElse("")
+                val arguments = info.arguments().orElse(emptyArray()).toList()
+                val commandLine = info.commandLine().orElse("")
+                if (command.isNotBlank() &&
+                    Paths.get(command).fileName.toString()
+                        .equals(scrcpyExecutable, ignoreCase = true) &&
+                    (arguments.windowTitle() == expectedTitle ||
+                        commandLine.contains(expectedTitle))
+                ) {
+                    process.destroy()
+                    if (process.isAlive) {
+                        process.destroyForcibly()
+                    }
+                }
+            }
+        }
+    }
+
     private fun start(
         command: List<String>,
         toolsScrcpy: Path,
@@ -82,4 +111,9 @@ class ScrcpyRepository(
             onOutput = onOutput,
             onTerminated = onTerminated,
         )
+
+    private fun List<String>.windowTitle(): String? =
+        indexOf("--window-title")
+            .takeIf { it >= 0 && it + 1 < size }
+            ?.let { this[it + 1] }
 }

@@ -16,10 +16,14 @@
                 serviceImplementation="com.danielribeiro.scrcpystudio.settings.ScrcpySettingsState"/>
         <projectService
                 serviceImplementation="com.danielribeiro.scrcpystudio.session.ScrcpySessionService"/>
+        <projectService
+                serviceImplementation="com.danielribeiro.scrcpystudio.ui.ScrcpyToolWindowController"/>
         <postStartupActivity implementation="com.danielribeiro.scrcpystudio.lifecycle.ScrcpyProjectActivity"/>
         <toolWindow
                 id="Scrcpy Studio"
                 anchor="right"
+                canCloseContents="true"
+                icon="/icons/scrcpyStudio.svg"
                 factoryClass="com.danielribeiro.scrcpystudio.ui.ScrcpyToolWindowFactory"/>
         <applicationConfigurable
                 parentId="tools"

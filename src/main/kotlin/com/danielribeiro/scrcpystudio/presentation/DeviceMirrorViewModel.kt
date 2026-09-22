@@ -155,6 +155,20 @@ class DeviceMirrorViewModel(
         service.takeScreenshot(serial, outputFile)
     }
 
+    fun saveScreenshotPreview(
+        serial: String,
+        previewFile: Path,
+        outputFile: Path,
+        resolutionPercent: Int,
+    ) {
+        service.saveScreenshotPreview(
+            serial = serial,
+            previewFile = previewFile,
+            outputFile = outputFile,
+            resolutionPercent = resolutionPercent,
+        )
+    }
+
     fun toggleMirrorMode(serial: String) {
         service.toggleMirrorMode(serial)
     }

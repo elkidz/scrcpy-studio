@@ -8,6 +8,7 @@ import com.danielribeiro.scrcpystudio.session.MirrorMode
 import com.danielribeiro.scrcpystudio.session.MirrorSessionState
 import com.danielribeiro.scrcpystudio.session.MirrorStatus
 import com.danielribeiro.scrcpystudio.session.RecordingStatus
+import com.danielribeiro.scrcpystudio.session.ScreenshotStatus
 import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsConfigurable
 import com.danielribeiro.scrcpystudio.settings.ScrcpySettingsState
 import com.intellij.ide.BrowserUtil
@@ -15,22 +16,25 @@ import com.intellij.icons.AllIcons
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.options.ShowSettingsUtil
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.ui.DialogWrapper
+import com.intellij.openapi.wm.ToolWindow
+import com.intellij.openapi.wm.ToolWindowType
 import com.intellij.ui.JBColor
 import com.intellij.ui.components.JBLabel
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
+import java.awt.Color
 import java.awt.FlowLayout
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import javax.swing.JFileChooser
 import javax.swing.JPanel
-import javax.swing.filechooser.FileNameExtensionFilter
 
 class MirrorSessionPanel(
     private val project: Project,
     private val viewModel: DeviceMirrorViewModel,
     initialDevice: AndroidDevice,
+    private val toolWindow: ToolWindow,
 ) : JPanel(BorderLayout()), Disposable {
 
     private var device = initialDevice
@@ -38,8 +42,12 @@ class MirrorSessionPanel(
         get() = device.serial
 
     private val errorLabel = JBLabel()
+    private val modeLabel = JBLabel()
     private var currentState = MirrorSessionState(device, MirrorStatus.STOPPED)
     private var recordingDialog: RecordingStatusDialog? = null
+    private var screenshotDialog: ScreenshotPreviewDialog? = null
+    private var screenshotPreviewFile: Path? = null
+    private val discardedScreenshotPreviews = mutableSetOf<Path>()
     private val powerButton = createScrcpyIconButton(
         icon = ScrcpyIcons.DevicePower,
         tooltip = "Power",
@@ -57,21 +65,6 @@ class MirrorSessionPanel(
         tooltip = "Volume up",
     ) {
         viewModel.sendVolumeUp(device.serial)
-    }
-    private val startStopButton = createScrcpyIconButton(
-        icon = AllIcons.Actions.Execute,
-        tooltip = "Start mirroring",
-    ) {
-        when (currentState.mirrorStatus) {
-            MirrorStatus.RUNNING,
-            MirrorStatus.STARTING,
-            -> viewModel.stopMirror(device.serial)
-
-            MirrorStatus.STOPPING -> Unit
-            MirrorStatus.STOPPED,
-            MirrorStatus.FAILED,
-            -> viewModel.startMirror(device.serial)
-        }
     }
     private val recordButton = createScrcpyIconButton(
         icon = ScrcpyIcons.DeviceRecord,
@@ -99,7 +92,7 @@ class MirrorSessionPanel(
         icon = ScrcpyIcons.DeviceScreenshot,
         tooltip = "Save a PNG screenshot",
     ) {
-        chooseScreenshotFile()
+        showScreenshotPreview()
     }
     private val backButton = createScrcpyIconButton(
         icon = ScrcpyIcons.DeviceBack,
@@ -138,6 +131,12 @@ class MirrorSessionPanel(
         ShowSettingsUtil.getInstance()
             .showSettingsDialog(project, ScrcpySettingsConfigurable::class.java)
     }
+    private val windowModeButton = createScrcpyIconButton(
+        icon = AllIcons.Actions.MoveToWindow,
+        tooltip = "Open Scrcpy Studio in a floating window",
+    ) {
+        toggleToolWindowMode()
+    }
     private val openOutputButton = createScrcpyIconButton(
         icon = AllIcons.Actions.ShowViewer,
         tooltip = "Open recording",
@@ -171,9 +170,16 @@ class MirrorSessionPanel(
 
     fun update(state: MirrorSessionState) {
         currentState = state
-        val errorMessage = state.errorMessage ?: state.recording.errorMessage
+        val errorMessage = state.errorMessage
+            ?: state.recording.errorMessage
+            ?: state.screenshot.errorMessage
         errorLabel.text = errorMessage.orEmpty()
         errorLabel.isVisible = errorMessage != null
+        val externalMode = state.mirrorMode == MirrorMode.EXTERNAL &&
+            state.mirrorStatus == MirrorStatus.RUNNING
+        modeLabel.text = state.modeMessage
+            ?: if (externalMode) "External scrcpy window" else ""
+        modeLabel.isVisible = state.modeMessage != null || externalMode
         when (state.recording.status) {
             RecordingStatus.STARTING,
             RecordingStatus.RECORDING,
@@ -188,33 +194,25 @@ class MirrorSessionPanel(
                 recordingDialog = null
             }
         }
+        when (state.screenshot.status) {
+            ScreenshotStatus.SAVING -> screenshotDialog?.setCapturing()
+            ScreenshotStatus.COMPLETED -> {
+                val outputFile = state.screenshot.outputFile
+                if (outputFile != null && outputFile == screenshotPreviewFile) {
+                    screenshotDialog?.setImage(outputFile)
+                }
+                cleanUpDiscardedScreenshot(outputFile)
+            }
 
-        val startStopTooltip = when (state.mirrorStatus) {
-            MirrorStatus.STARTING,
-            MirrorStatus.RUNNING,
-            -> "Stop mirroring"
+            ScreenshotStatus.FAILED -> {
+                screenshotDialog?.showError(
+                    state.screenshot.errorMessage ?: "Unable to capture the screenshot.",
+                )
+                cleanUpDiscardedScreenshot(state.screenshot.outputFile)
+            }
 
-            MirrorStatus.STOPPING -> "Stopping mirroring..."
-            MirrorStatus.STOPPED,
-            MirrorStatus.FAILED,
-            -> "Start mirroring"
+            ScreenshotStatus.IDLE -> Unit
         }
-        updateScrcpyIconButton(
-            button = startStopButton,
-            icon = when (state.mirrorStatus) {
-                MirrorStatus.STARTING,
-                MirrorStatus.RUNNING,
-                -> AllIcons.Actions.Close
-
-                MirrorStatus.STOPPING -> AllIcons.Actions.Suspend
-                MirrorStatus.STOPPED,
-                MirrorStatus.FAILED,
-                -> AllIcons.Actions.Execute
-            },
-            tooltip = startStopTooltip,
-        )
-        startStopButton.isEnabled = state.mirrorStatus != MirrorStatus.STOPPING &&
-            state.device.canMirror
 
         val recordTooltip = when (state.recording.status) {
             RecordingStatus.STARTING,
@@ -250,15 +248,14 @@ class MirrorSessionPanel(
 
         val isRunning = state.mirrorStatus == MirrorStatus.RUNNING
         val canControl = state.device.canMirror && isRunning
-        val canUseHardwareKeys = state.device.canMirror
-        powerButton.isEnabled = canUseHardwareKeys
-        volumeDownButton.isEnabled = canUseHardwareKeys
-        volumeUpButton.isEnabled = canUseHardwareKeys
+        powerButton.isEnabled = canControl
+        volumeDownButton.isEnabled = canControl
+        volumeUpButton.isEnabled = canControl
         rotateButton.isEnabled = canControl
         backButton.isEnabled = canControl
         homeButton.isEnabled = canControl
         recentsButton.isEnabled = canControl
-        screenshotButton.isEnabled = state.device.canMirror
+        screenshotButton.isEnabled = canControl
         modeButton.isEnabled = state.device.canMirror &&
             state.mirrorStatus !in setOf(MirrorStatus.STARTING, MirrorStatus.STOPPING)
         val modeTooltip = if (state.mirrorMode == MirrorMode.EMBEDDED) {
@@ -271,6 +268,7 @@ class MirrorSessionPanel(
             icon = AllIcons.Actions.SwapPanels,
             tooltip = modeTooltip,
         )
+        updateWindowModeButton()
 
         openOutputButton.isVisible = state.recording.outputFile?.let {
             Files.isRegularFile(it)
@@ -279,6 +277,7 @@ class MirrorSessionPanel(
             Files.isRegularFile(it)
         } == true
         footer.isVisible = errorLabel.isVisible ||
+            modeLabel.isVisible ||
             openOutputButton.isVisible ||
             openScreenshotButton.isVisible
 
@@ -290,29 +289,35 @@ class MirrorSessionPanel(
     override fun dispose() {
         recordingDialog?.closeAfterStop()
         recordingDialog = null
+        cancelScreenshotPreview()
         mirrorHost.dispose()
     }
 
     private fun createToolbar(): JPanel =
-        JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+        JPanel(BorderLayout()).apply {
             border = JBUI.Borders.emptyBottom(4)
-            add(powerButton.component)
-            add(volumeDownButton.component)
-            add(volumeUpButton.component)
-            add(createScrcpyToolbarSeparator())
-            add(rotateButton.component)
-            add(createScrcpyToolbarSeparator())
-            add(backButton.component)
-            add(homeButton.component)
-            add(recentsButton.component)
-            add(createScrcpyToolbarSeparator())
-            add(screenshotButton.component)
-            add(recordButton.component)
-            add(createScrcpyToolbarSeparator())
-            add(modeButton.component)
-            add(startStopButton.component)
-            add(optionsButton.component)
-            add(settingsButton.component)
+            add(
+                JPanel(FlowLayout(FlowLayout.LEFT, 0, 0)).apply {
+                    add(powerButton.component)
+                    add(volumeDownButton.component)
+                    add(volumeUpButton.component)
+                    add(createScrcpyToolbarSeparator())
+                    add(rotateButton.component)
+                    add(createScrcpyToolbarSeparator())
+                    add(backButton.component)
+                    add(homeButton.component)
+                    add(recentsButton.component)
+                    add(createScrcpyToolbarSeparator())
+                    add(screenshotButton.component)
+                    add(recordButton.component)
+                    add(createScrcpyToolbarSeparator())
+                    add(modeButton.component)
+                    add(optionsButton.component)
+                    add(settingsButton.component)
+                },
+                BorderLayout.WEST,
+            )
+            add(windowModeButton.component, BorderLayout.EAST)
         }
 
     private fun createFooter(): JPanel =
@@ -322,6 +327,11 @@ class MirrorSessionPanel(
             add(
                 JPanel(FlowLayout(FlowLayout.LEFT, 4, 2)).apply {
                     errorLabel.foreground = JBColor.RED
+                    modeLabel.foreground = JBColor.namedColor(
+                        "Label.infoForeground",
+                        JBColor(Color(0x589DF6), Color(0x589DF6)),
+                    )
+                    add(modeLabel)
                     add(errorLabel)
                 },
                 BorderLayout.CENTER,
@@ -337,6 +347,29 @@ class MirrorSessionPanel(
 
     private fun showScrcpyOptions() {
         ScrcpyOptionsPopup.show(optionsButton.component, viewModel)
+    }
+
+    private fun toggleToolWindowMode() {
+        val nextType = if (toolWindow.type == ToolWindowType.FLOATING) {
+            ToolWindowType.DOCKED
+        } else {
+            ToolWindowType.FLOATING
+        }
+        toolWindow.setType(nextType, null)
+        updateWindowModeButton()
+    }
+
+    private fun updateWindowModeButton() {
+        val isFloating = toolWindow.type == ToolWindowType.FLOATING
+        updateScrcpyIconButton(
+            button = windowModeButton,
+            icon = AllIcons.Actions.MoveToWindow,
+            tooltip = if (isFloating) {
+                "Dock Scrcpy Studio"
+            } else {
+                "Open Scrcpy Studio in a floating window"
+            },
+        )
     }
 
     private fun showRecordingOptions() {
@@ -381,32 +414,78 @@ class MirrorSessionPanel(
             ?.let(Paths::get)
             ?: Paths.get(System.getProperty("user.home"), "Videos", "Scrcpy Studio")
 
-    private fun chooseScreenshotFile() {
-        val directory = Paths.get(
-            System.getProperty("user.home"),
-            "Pictures",
-            "Scrcpy Studio",
+    private fun showScreenshotPreview() {
+        val dialog = ScreenshotPreviewDialog(
+            project = project,
+            device = device,
+            initialDirectory = configuredScreenshotDirectory(),
+            outputDirectoryProvider = ::configuredScreenshotDirectory,
+            onConfigure = {
+                ShowSettingsUtil.getInstance()
+                    .showSettingsDialog(project, ScrcpySettingsConfigurable::class.java)
+            },
+            onRecapture = ::captureScreenshotPreview,
+            onSave = ::saveScreenshotPreview,
+            onCancel = ::cancelScreenshotPreview,
         )
-        val currentDirectory = directory
-            .takeIf { Files.isDirectory(it) }
-            ?: Paths.get(System.getProperty("user.home"))
-        val suggestedFile = ScreenshotFileNamer.nextFile(directory, device)
-
-        val chooser = JFileChooser(currentDirectory.toFile()).apply {
-            dialogTitle = "Save device screenshot"
-            selectedFile = suggestedFile.toFile()
-            fileFilter = FileNameExtensionFilter("PNG image (*.png)", "png")
-        }
-        if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return
-
-        val selected = chooser.selectedFile.toPath().let(::ensurePngExtension)
-        viewModel.takeScreenshot(device.serial, selected)
+        screenshotDialog = dialog
+        captureScreenshotPreview()
+        dialog.show()
     }
 
-    private fun ensurePngExtension(file: Path): Path =
-        if (file.fileName.toString().endsWith(".png", ignoreCase = true)) {
-            file
-        } else {
-            file.resolveSibling("${file.fileName}.png")
+    private fun captureScreenshotPreview() {
+        screenshotPreviewFile?.let {
+            Files.deleteIfExists(it)
         }
+        val temporary = Files.createTempFile("scrcpy-studio-screenshot-", ".png").also {
+            Files.deleteIfExists(it)
+        }
+        screenshotPreviewFile = temporary
+        viewModel.takeScreenshot(device.serial, temporary)
+    }
+
+    private fun saveScreenshotPreview(resolutionPercent: Int) {
+        val previewFile = screenshotPreviewFile ?: return
+        val outputFile = ScreenshotFileNamer.nextFile(
+            directory = configuredScreenshotDirectory(),
+            device = device,
+        )
+        screenshotDialog = null
+        screenshotPreviewFile = null
+        viewModel.saveScreenshotPreview(
+            serial = device.serial,
+            previewFile = previewFile,
+            outputFile = outputFile,
+            resolutionPercent = resolutionPercent,
+        )
+    }
+
+    private fun cancelScreenshotPreview() {
+        screenshotDialog?.let {
+            if (it.isShowing) {
+                it.close(DialogWrapper.CANCEL_EXIT_CODE)
+            }
+        }
+        screenshotDialog = null
+        screenshotPreviewFile?.let {
+            discardedScreenshotPreviews.add(it)
+            Files.deleteIfExists(it)
+        }
+        screenshotPreviewFile = null
+    }
+
+    private fun cleanUpDiscardedScreenshot(outputFile: Path?) {
+        outputFile ?: return
+        if (discardedScreenshotPreviews.remove(outputFile)) {
+            Files.deleteIfExists(outputFile)
+        }
+    }
+
+    private fun configuredScreenshotDirectory(): Path =
+        ScrcpySettingsState.getInstance()
+            .getState()
+            .screenshotDirectory
+            .takeIf(String::isNotBlank)
+            ?.let(Paths::get)
+            ?: Paths.get(System.getProperty("user.home"), "Pictures", "Scrcpy Studio")
 }

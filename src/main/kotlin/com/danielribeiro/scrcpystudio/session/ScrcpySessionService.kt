@@ -86,6 +86,13 @@ class ScrcpySessionService(
     )
     val videoFrames: SharedFlow<ScrcpyVideoFrame> = _videoFrames.asSharedFlow()
 
+    private val _deviceConnectionEvents = MutableSharedFlow<DeviceConnectionDiff>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val deviceConnectionEvents: SharedFlow<DeviceConnectionDiff> =
+        _deviceConnectionEvents.asSharedFlow()
+
     private val mirrorProcesses = ConcurrentHashMap<String, ManagedProcess>()
     private val protocolSessions = ConcurrentHashMap<String, ScrcpyProtocolSession>()
     private val recordingProcesses = ConcurrentHashMap<String, ManagedProcess>()
@@ -150,6 +157,7 @@ class ScrcpySessionService(
                     return@launch
                 }
 
+                scrcpyRepository.stopStaleExternalMirror(device)
                 val mode = requestedMode
                     ?: preferredModes[serial]
                     ?: MirrorMode.EMBEDDED
@@ -517,6 +525,50 @@ class ScrcpySessionService(
         }
     }
 
+    fun saveScreenshotPreview(
+        serial: String,
+        previewFile: Path,
+        outputFile: Path,
+        resolutionPercent: Int,
+    ) {
+        val normalizedPreview = previewFile.toAbsolutePath().normalize()
+        val normalizedOutput = outputFile.toAbsolutePath().normalize()
+        updateScreenshot(
+            serial = serial,
+            screenshot = ScreenshotState(
+                status = ScreenshotStatus.SAVING,
+                outputFile = normalizedOutput,
+            ),
+        )
+        scope.launch(Dispatchers.IO) {
+            try {
+                val savedFile = screenshotRepository.savePreview(
+                    previewFile = normalizedPreview,
+                    outputFile = normalizedOutput,
+                    resolutionPercent = resolutionPercent,
+                )
+                updateScreenshot(
+                    serial = serial,
+                    screenshot = ScreenshotState(
+                        status = ScreenshotStatus.COMPLETED,
+                        outputFile = savedFile,
+                    ),
+                )
+            } catch (error: Exception) {
+                updateScreenshot(
+                    serial = serial,
+                    screenshot = ScreenshotState(
+                        status = ScreenshotStatus.FAILED,
+                        outputFile = normalizedOutput,
+                        errorMessage = error.message ?: "Unable to save the screenshot.",
+                    ),
+                )
+            } finally {
+                Files.deleteIfExists(normalizedPreview)
+            }
+        }
+    }
+
     private fun sendNavigationKeyevent(
         serial: String,
         keycode: Int,
@@ -686,6 +738,9 @@ class ScrcpySessionService(
             }
         }
         if (processConnectionEvents && devices != null && deviceDiff != null) {
+            if (deviceDiff.connected.isNotEmpty()) {
+                _deviceConnectionEvents.tryEmit(deviceDiff)
+            }
             handleDeviceChanges(deviceDiff)
         }
         return devices
